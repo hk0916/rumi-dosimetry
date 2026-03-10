@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dosimetry - Wireframe</title>
+<style>
+  :root {
+    --primary: #2F5496;
+    --primary-light: #4472C4;
+    --sidebar-bg: #1a1a2e;
+    --sidebar-text: #a0a0b8;
+    --sidebar-active: #ffffff;
+    --bg: #f5f6fa;
+    --card-bg: #ffffff;
+    --border: #e0e0e0;
+    --text: #333333;
+    --text-light: #888888;
+    --online: #52c41a;
+    --offline: #bfbfbf;
+    --yellow-bar: #faad14;
+    --chart-blue: #4472C4;
+    --chart-green: #70ad47;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+
+  /* ── Layout ── */
+  .app { display: flex; height: 100vh; }
+
+  .sidebar {
+    width: 220px; background: var(--sidebar-bg); color: var(--sidebar-text);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-logo {
+    padding: 20px 16px; font-size: 18px; font-weight: 700; color: #fff;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .sidebar-logo span { color: var(--yellow-bar); }
+  .sidebar-nav { flex: 1; padding: 12px 0; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 20px; cursor: pointer; font-size: 14px;
+    transition: all 0.15s; border-left: 3px solid transparent;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.06); color: #ccc; }
+  .nav-item.active { background: rgba(255,255,255,0.1); color: var(--sidebar-active); border-left-color: var(--yellow-bar); font-weight: 600; }
+  .nav-icon { width: 18px; text-align: center; font-size: 15px; }
+
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .header {
+    height: 52px; background: var(--card-bg); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; padding: 0 24px;
+  }
+  .header-title { font-size: 16px; font-weight: 600; }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .header-user {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 6px 12px; border-radius: 6px; background: var(--primary); color: #fff; font-size: 13px;
+  }
+
+  .content { flex: 1; padding: 20px 24px; overflow-y: auto; }
+
+  /* ── Screens ── */
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid var(--border); }
+  .tab {
+    padding: 10px 24px; cursor: pointer; font-size: 14px; font-weight: 500;
+    color: var(--text-light); border-bottom: 2px solid transparent; margin-bottom: -2px;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+  /* ── Table ── */
+  .table-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .btn {
+    padding: 7px 16px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--card-bg); cursor: pointer; font-size: 13px; transition: all 0.15s;
+  }
+  .btn:hover { border-color: var(--primary); color: var(--primary); }
+  .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .btn-primary:hover { background: var(--primary-light); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  thead th { background: #fafafa; padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; color: var(--text-light); border-bottom: 1px solid var(--border); text-transform: uppercase; }
+  tbody td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+  tbody tr { cursor: pointer; transition: background 0.1s; }
+  tbody tr:hover { background: #f8f9ff; }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .status-online { background: var(--online); }
+  .status-offline { background: var(--offline); }
+  .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 13px; color: var(--text-light); }
+
+  /* ── Card ── */
+  .card { background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 16px; }
+  .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.4); z-index: 100; justify-content: center; align-items: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--card-bg); border-radius: 12px; width: 720px; max-height: 85vh;
+    overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+  }
+  .modal-header h3 { font-size: 16px; }
+  .modal-close { cursor: pointer; font-size: 20px; color: var(--text-light); background: none; border: none; }
+  .modal-body { padding: 20px 24px; }
+  .modal-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); padding: 0 24px; }
+  .modal-tab { padding: 10px 20px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--text-light); }
+  .modal-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+  .modal-section { margin-bottom: 20px; }
+  .modal-section-title { font-size: 12px; font-weight: 600; color: var(--text-light); text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+  .field-row { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #f5f5f5; }
+  .field-label { width: 160px; font-size: 13px; color: var(--text-light); flex-shrink: 0; }
+  .field-value { font-size: 13px; flex: 1; }
+  .field-input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; width: 100%; }
+  .field-select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; background: #fff; }
+  .field-toggle { width: 40px; height: 22px; border-radius: 11px; background: var(--online); position: relative; cursor: pointer; }
+  .field-toggle::after { content:''; position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; background: #fff; border-radius: 50%; }
+  .field-toggle.off { background: var(--offline); }
+  .field-toggle.off::after { right: auto; left: 2px; }
+  .upload-btn { padding: 5px 14px; border: 1px dashed var(--primary); color: var(--primary); background: #f0f5ff; border-radius: 4px; cursor: pointer; font-size: 12px; }
+
+  /* ── Chart Placeholder ── */
+  .chart-area {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+    height: 320px; position: relative; overflow: hidden;
+  }
+  .chart-area.tall { height: 380px; }
+  .chart-y-axis { position: absolute; left: 10px; top: 20px; bottom: 40px; width: 50px; display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: var(--text-light); text-align: right; }
+  .chart-x-axis { position: absolute; bottom: 8px; left: 60px; right: 20px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-light); }
+  .chart-grid { position: absolute; top: 20px; bottom: 40px; left: 60px; right: 20px; }
+  .chart-grid-line { border-bottom: 1px dashed #eee; height: 25%; }
+  .chart-label { position: absolute; top: 8px; right: 16px; font-size: 11px; display: flex; gap: 16px; }
+  .chart-legend { display: flex; align-items: center; gap: 4px; }
+  .legend-line { width: 20px; height: 2px; }
+
+  /* SVG chart lines */
+  .chart-svg { position: absolute; top: 20px; bottom: 40px; left: 60px; right: 20px; }
+
+  /* ── Filter Toolbar ── */
+  .filter-toolbar {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px; margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .filter-group { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .filter-label { font-weight: 600; font-size: 12px; color: var(--text-light); }
+
+  /* ── Footer Calc ── */
+  .calc-footer {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: #fff; border: 1px solid var(--border); border-radius: 8px; margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .calc-group { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .calc-label { font-weight: 600; font-size: 12px; color: var(--text-light); }
+  .calc-value { padding: 4px 8px; background: #f5f5f5; border-radius: 4px; font-size: 12px; min-width: 80px; text-align: center; }
+
+  /* ── Monitoring ── */
+  .device-selector { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .device-selector label { font-size: 13px; font-weight: 600; }
+  .device-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; min-width: 200px; }
+
+  /* ── Data Analysis ── */
+  .analysis-selectors { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  .selector-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 200px; }
+  .selector-title { font-size: 12px; font-weight: 600; color: var(--text-light); margin-bottom: 8px; text-transform: uppercase; }
+
+  /* ── Login ── */
+  .login-screen { display: none; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); }
+  .login-screen.active { display: flex; }
+  .login-card { background: #fff; border-radius: 16px; padding: 40px; width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); text-align: center; }
+  .login-logo { font-size: 28px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
+  .login-subtitle { color: var(--text-light); font-size: 13px; margin-bottom: 28px; }
+  .login-input { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; margin-bottom: 12px; outline: none; }
+  .login-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(47,84,150,0.15); }
+  .login-btn { width: 100%; padding: 12px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  .login-btn:hover { background: var(--primary-light); }
+
+  /* ── Wireframe Badge ── */
+  .wireframe-badge {
+    position: fixed; top: 8px; right: 8px; background: #ff4d4f; color: #fff;
+    padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; z-index: 200;
+    letter-spacing: 1px;
+  }
+
+  /* ── Setting Modal ── */
+  .setting-sidebar { display: flex; gap: 0; }
+  .setting-left { width: 180px; border-right: 1px solid var(--border); padding: 16px 0; }
+  .setting-menu { padding: 8px 20px; font-size: 13px; cursor: pointer; color: var(--text-light); }
+  .setting-menu.active { color: var(--primary); background: #f0f5ff; font-weight: 600; }
+  .setting-right { flex: 1; padding: 16px 24px; }
+
+  /* responsive */
+  @media (max-width: 900px) {
+    .sidebar { width: 56px; }
+    .sidebar-logo span, .nav-label { display: none; }
+    .nav-item { justify-content: center; padding: 14px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wireframe-badge">WIREFRAME</div>
+
+<!-- ═══ LOGIN SCREEN ═══ -->
+<div class="login-screen active" id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">DOSIMETRY</div>
+    <div class="login-subtitle">방사선 선량 측정 시스템</div>
+    <input class="login-input" type="text" placeholder="아이디 입력" value="admin">
+    <input class="login-input" type="password" placeholder="비밀번호 입력" value="••••••••">
+    <button class="login-btn" onclick="doLogin()">로그인</button>
+    <div style="margin-top:16px; font-size:12px; color:var(--text-light);">처음 방문이신가요? → 관리자에게 문의</div>
+  </div>
+</div>
+
+<!-- ═══ MAIN APP ═══ -->
+<div class="app" id="mainApp" style="display:none;">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-logo">✦ <span>Dosimetry</span></div>
+    <div class="sidebar-nav">
+      <div class="nav-item active" onclick="showScreen('device')">
+        <span class="nav-icon">◉</span><span class="nav-label">Device</span>
+      </div>
+      <div class="nav-item" onclick="showScreen('monitoring')">
+        <span class="nav-icon">◈</span><span class="nav-label">Data Monitoring</span>
+      </div>
+      <div class="nav-item" onclick="showScreen('calibration')">
+        <span class="nav-icon">◇</span><span class="nav-label">Calibration</span>
+      </div>
+      <div class="nav-item" onclick="showScreen('manage-cal')">
+        <span class="nav-icon">▣</span><span class="nav-label">Manage Calibration</span>
+      </div>
+      <div class="nav-item" onclick="showScreen('analysis')">
+        <span class="nav-icon">△</span><span class="nav-label">Data Analysis</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-title" id="headerTitle">Device</div>
+      <div class="header-right">
+        <span style="font-size:13px; color:var(--text-light);">🔍</span>
+        <div class="header-user" onclick="openModal('settingModal')">👤 관리자</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ═══ DEVICE SCREEN ═══ -->
+      <div class="screen active" id="screen-device">
+        <div class="tabs">
+          <div class="tab active" onclick="switchDeviceTab('dosimeter', this)">Dosimeter</div>
+          <div class="tab" onclick="switchDeviceTab('gateway', this)">Gateway</div>
+        </div>
+
+        <!-- Dosimeter Tab -->
+        <div id="tab-dosimeter">
+          <div class="table-toolbar">
+            <span style="font-size:13px; color:var(--text-light);">14건 중 1 - 14 항목</span>
+            <button class="btn btn-primary">+ Add Device</button>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Device Name</th><th>Status</th><th>Device Type</th><th>MAC Address</th><th>Battery</th><th>RSSI</th><th>Voltage</th><th>Uptime</th></tr>
+            </thead>
+            <tbody>
+              <tr onclick="openModal('dosimeterModal')"><td style="color:var(--primary);font-weight:600;">선형가03</td><td><span class="status-dot status-online"></span>Online</td><td>Skin Dosimeter</td><td>06:06:04:04:03:03</td><td>3813%</td><td>-52dBm</td><td>215.28</td><td>2026-02-12 10:00:40</td></tr>
+              <tr><td style="color:var(--primary);font-weight:600;">선형가04</td><td><span class="status-dot status-online"></span>Online</td><td>Skin Dosimeter</td><td>06:06:04:04:04:04</td><td>3700%</td><td>-54dBm</td><td>214.50</td><td>2026-02-12 10:04:12</td></tr>
+              <tr><td>콩이네라떼01</td><td><span class="status-dot status-offline"></span>Offline</td><td>Skin Dosimeter</td><td>06:06:04:04:02:0C</td><td>4044%</td><td>-61dBm</td><td>239.93</td><td>2026-01-23 18:37:22</td></tr>
+              <tr><td>콩이라떼04</td><td><span class="status-dot status-offline"></span>Offline</td><td>Skin Dosimeter</td><td>06:06:04:04:02:08</td><td>4077%</td><td>-</td><td>-</td><td>2026-01-26 17:27:38</td></tr>
+              <tr><td>콩이네라떼03</td><td><span class="status-dot status-offline"></span>Offline</td><td>Skin Dosimeter</td><td>06:06:04:04:02:09</td><td>4022%</td><td>-71dBm</td><td>186.43</td><td>2025-12-04 18:33:53</td></tr>
+              <tr><td>콩이라떼05</td><td><span class="status-dot status-offline"></span>Offline</td><td>Skin Dosimeter</td><td>06:06:04:04:02:12</td><td>4054%</td><td>-80dBm</td><td>200mV</td><td>2025-11-30 15:53:00</td></tr>
+              <tr><td>아이온테스01</td><td><span class="status-dot status-offline"></span>Offline</td><td>Skin Dosimeter</td><td>06:06:04:04:02:08</td><td>4064%</td><td>-</td><td>199.27</td><td>2025-12-04 06:48:25</td></tr>
+            </tbody>
+          </table>
+          <div class="pagination">
+            <span>페이지 당 항목 수: 20</span>
+            <span>1 페이지 중 1 &nbsp; ‹ ›</span>
+          </div>
+        </div>
+
+        <!-- Gateway Tab -->
+        <div id="tab-gateway" style="display:none;">
+          <div class="table-toolbar">
+            <span style="font-size:13px; color:var(--text-light);">1건 중 1 - 1 항목</span>
+            <button class="btn btn-primary">+ Add Gateway</button>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Device Name</th><th>Status</th><th>Device Type</th><th>MAC Address</th><th>Server IP</th><th>Uptime</th></tr>
+            </thead>
+            <tbody>
+              <tr onclick="openModal('gatewayModal')">
+                <td style="color:var(--primary);font-weight:600;">● TwinTracker#192.168.0.6</td>
+                <td><span class="status-dot status-online"></span>Online</td>
+                <td>Twin Tracker BLE</td>
+                <td>D1:FA:88:37:A0:86</td>
+                <td>192.168.0.200</td>
+                <td>2026-02-12 10:03:56</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pagination">
+            <span>페이지 당 항목 수: 20</span>
+            <span>1 페이지 중 1 &nbsp; ‹ ›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ DATA MONITORING SCREEN ═══ -->
+      <div class="screen" id="screen-monitoring">
+        <div class="card">
+          <div class="device-selector">
+            <label>Device</label>
+            <select class="device-select">
+              <option>✦ 선형가04</option>
+              <option>선형가03</option>
+              <option>콩이네라떼01</option>
+            </select>
+            <button class="btn btn-primary" style="margin-left:8px;">▶ Start</button>
+            <button class="btn">■ Stop</button>
+          </div>
+        </div>
+        <div class="chart-area tall" style="margin-top:16px;">
+          <div class="chart-label">
+            <div class="chart-legend"><div class="legend-line" style="background:var(--chart-blue)"></div>Voltage (mV)</div>
+          </div>
+          <div class="chart-y-axis"><span>250</span><span>200</span><span>150</span><span>100</span><span>50</span></div>
+          <div class="chart-grid"><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div></div>
+          <svg class="chart-svg" viewBox="0 0 800 260" preserveAspectRatio="none" style="width:100%;height:100%;">
+            <polyline fill="none" stroke="#4472C4" stroke-width="2" points="0,200 80,198 160,202 240,195 320,200 400,198 480,30 500,20 520,35 560,190 640,200 720,198 800,200"/>
+          </svg>
+          <div class="chart-x-axis"><span>10:04:05</span><span>10:04:07</span><span>10:04:09</span><span>10:04:11</span><span>10:04:13</span><span>10:04:15</span><span>10:04:17</span></div>
+          <div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--text-light);">Time</div>
+        </div>
+      </div>
+
+      <!-- ═══ CALIBRATION SCREEN ═══ -->
+      <div class="screen" id="screen-calibration">
+        <div class="filter-toolbar">
+          <div class="filter-group"><span class="filter-label">Filter</span><select class="field-select"><option>Median</option><option>Arithmetic Mean</option><option>Geometric Mean</option><option>Least Square</option><option>Envelope</option><option>Bezier</option></select></div>
+          <div class="filter-group"><span class="filter-label">Window Size</span><input class="field-input" style="width:70px" value="100"></div>
+          <div class="filter-group"><button class="btn btn-primary">Apply</button></div>
+          <div class="filter-group"><span class="filter-label">Baseline</span><input class="field-input" style="width:70px" value="220"></div>
+          <div class="filter-group"><button class="btn btn-primary">Apply</button></div>
+        </div>
+
+        <div style="display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
+          <div class="card" style="flex:0 0 220px;">
+            <div class="card-title">조건 설정</div>
+            <div class="field-row"><span class="field-label">Device</span><span class="field-value">✦ 콩이터널01/02</span></div>
+            <div class="field-row"><span class="field-label">Date</span><span class="field-value">2026.01.23</span></div>
+            <div class="field-row"><span class="field-label">Start Time</span><span class="field-value">19:10</span></div>
+            <div class="field-row"><span class="field-label">End Time</span><span class="field-value">20:00</span></div>
+            <button class="btn btn-primary" style="width:100%; margin-top:12px;">Import Data</button>
+          </div>
+          <div style="flex:1; min-width:400px;">
+            <div class="chart-area tall">
+              <div class="chart-label">
+                <div class="chart-legend"><div class="legend-line" style="background:var(--chart-blue)"></div>Original</div>
+                <div class="chart-legend"><div class="legend-line" style="background:#faad14"></div>Baseline</div>
+                <div class="chart-legend"><div class="legend-line" style="background:var(--chart-green)"></div>Filtered</div>
+              </div>
+              <div class="chart-y-axis"><span>2175</span><span>1500</span><span>1000</span><span>500</span><span>0</span></div>
+              <div class="chart-grid"><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div></div>
+              <svg class="chart-svg" viewBox="0 0 800 300" preserveAspectRatio="none" style="width:100%;height:100%;">
+                <line x1="0" y1="258" x2="800" y2="258" stroke="#faad14" stroke-width="1.5" stroke-dasharray="6,3"/>
+                <polyline fill="none" stroke="#4472C4" stroke-width="1.8" points="0,250 100,248 200,252 280,240 320,60 340,15 360,25 380,50 400,180 420,240 500,252 600,248 700,250 800,248"/>
+                <polyline fill="none" stroke="#70ad47" stroke-width="1.8" points="0,290 100,290 200,290 280,288 320,190 340,150 360,160 380,185 400,280 420,290 500,290 600,290 700,290 800,290"/>
+              </svg>
+              <div class="chart-x-axis"><span>19:10</span><span>19:20</span><span>19:30</span><span>19:40</span><span>19:50</span><span>20:00</span></div>
+              <div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--text-light);">Time(s)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="calc-footer">
+          <div class="calc-group"><span class="calc-label">Start Time</span><input class="field-input" style="width:90px" value="19:15:08"></div>
+          <div class="calc-group"><span>⏤</span></div>
+          <div class="calc-group"><span class="calc-label">End Time</span><input class="field-input" style="width:90px" value="19:19:04"></div>
+          <div class="calc-group"><button class="btn btn-primary">Apply</button></div>
+          <div class="calc-group"><span class="calc-label">Cumulative Dose</span><div class="calc-value">226293.11</div><span style="font-size:11px">V·s</span></div>
+          <div class="calc-group"><span class="calc-label">Delivered Dose</span><input class="field-input" style="width:70px" value="100"><span style="font-size:11px">cGy</span></div>
+          <div class="calc-group"><span class="calc-label">Result</span><div class="calc-value" style="background:#e6f7ff;font-weight:700;">2262.93</div><span style="font-size:11px">mV/cGy</span></div>
+          <div class="calc-group"><button class="btn btn-primary">Save</button></div>
+        </div>
+      </div>
+
+      <!-- ═══ MANAGE CALIBRATION SCREEN ═══ -->
+      <div class="screen" id="screen-manage-cal">
+        <div class="filter-toolbar">
+          <div class="filter-group"><span class="filter-label">Filter</span><select class="field-select"><option>Median</option></select></div>
+          <div class="filter-group"><span class="filter-label">Window Size</span><input class="field-input" style="width:70px" value="100"></div>
+          <div class="filter-group"><span class="filter-label">Baseline</span><input class="field-input" style="width:70px" value="220"></div>
+          <div class="filter-group"><button class="btn btn-primary">Apply</button></div>
+        </div>
+
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+          <div class="card" style="flex:0 0 220px;">
+            <div class="card-title">Saved CF Factors</div>
+            <div style="border:1px solid var(--border); border-radius:6px; overflow:hidden;">
+              <div style="padding:10px 12px; background:#f0f5ff; border-bottom:1px solid var(--border); font-weight:600; font-size:13px; cursor:pointer;">sensor</div>
+              <div style="padding:10px 12px; font-size:13px; cursor:pointer; color:var(--text-light); border-bottom:1px solid #f0f0f0;">2426.6894028...</div>
+            </div>
+            <div style="margin-top:12px;">
+              <div class="field-row"><span class="field-label">Device</span><span class="field-value" style="font-size:12px;">✦ 콩이터널01/02</span></div>
+              <div class="field-row"><span class="field-label">CF Factor</span><span class="field-value" style="font-weight:700;">2262.93</span></div>
+            </div>
+          </div>
+          <div style="flex:1; min-width:400px;">
+            <div class="chart-area tall">
+              <div class="chart-label">
+                <div class="chart-legend"><div class="legend-line" style="background:var(--chart-blue)"></div>Original</div>
+                <div class="chart-legend"><div class="legend-line" style="background:#faad14"></div>Baseline</div>
+                <div class="chart-legend"><div class="legend-line" style="background:var(--chart-green)"></div>Filtered</div>
+              </div>
+              <div class="chart-y-axis"><span>2175</span><span>1500</span><span>1000</span><span>500</span><span>0</span></div>
+              <div class="chart-grid"><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div></div>
+              <svg class="chart-svg" viewBox="0 0 800 300" preserveAspectRatio="none" style="width:100%;height:100%;">
+                <line x1="0" y1="258" x2="800" y2="258" stroke="#faad14" stroke-width="1.5" stroke-dasharray="6,3"/>
+                <polyline fill="none" stroke="#4472C4" stroke-width="1.8" points="0,250 100,248 200,252 280,240 320,60 340,15 360,25 380,50 400,180 420,240 500,252 600,248 700,250 800,248"/>
+                <polyline fill="none" stroke="#70ad47" stroke-width="1.8" points="0,290 100,290 200,290 280,288 320,190 340,150 360,160 380,185 400,280 420,290 500,290 600,290 700,290 800,290"/>
+              </svg>
+              <div class="chart-x-axis"><span>19:10</span><span>19:20</span><span>19:30</span><span>19:40</span><span>19:50</span><span>20:00</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="calc-footer">
+          <div class="calc-group"><span class="calc-label">Start Time</span><div class="calc-value">19:15:08</div></div>
+          <div class="calc-group"><span class="calc-label">End Time</span><div class="calc-value">19:19:04</div></div>
+          <div class="calc-group"><span class="calc-label">Cumulative Dose</span><div class="calc-value">226293.11 V·s</div></div>
+          <div class="calc-group"><span class="calc-label">CF Factor</span><div class="calc-value" style="background:#e6f7ff;font-weight:700;">2262.93 mV/cGy</div></div>
+          <div class="calc-group"><button class="btn btn-primary">Save</button></div>
+          <div class="calc-group"><button class="btn" style="color:#ff4d4f; border-color:#ff4d4f;">Delete</button></div>
+        </div>
+      </div>
+
+      <!-- ═══ DATA ANALYSIS SCREEN ═══ -->
+      <div class="screen" id="screen-analysis">
+        <div class="filter-toolbar">
+          <div class="filter-group"><span class="filter-label">Filter</span><select class="field-select"><option>Median</option></select></div>
+          <div class="filter-group"><span class="filter-label">Window Size</span><input class="field-input" style="width:70px" value="100"></div>
+          <div class="filter-group"><span class="filter-label">Baseline</span><input class="field-input" style="width:70px" value="220"></div>
+          <div class="filter-group"><button class="btn btn-primary">Apply</button></div>
+          <div class="filter-group" style="margin-left:auto;">
+            <select class="field-select"><option>Photon</option><option>Electron & Muon</option><option>Proton</option><option>Neutron</option><option>Alpha / Heavy Ion</option></select>
+          </div>
+          <div class="filter-group">
+            <select class="field-select"><option>Breast</option><option>Colon</option><option>Stomach</option><option>Lung</option><option>Gonads</option><option>Bladder</option><option>Liver</option><option>Esophagus</option><option>Thyroid</option><option>Bone Surface</option><option>Brain</option><option>Salivary Glands</option><option>Skin</option><option>Residual Tissues</option></select>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+          <div class="card" style="flex:0 0 220px;">
+            <div class="card-title">조건 설정</div>
+            <div class="field-row"><span class="field-label">Device</span><span class="field-value">✦ 콩이터널01/02</span></div>
+            <div class="field-row"><span class="field-label">Date</span><span class="field-value">2026.01.23</span></div>
+            <div class="field-row"><span class="field-label">Start Time</span><span class="field-value">19:00</span></div>
+            <div class="field-row"><span class="field-label">End Time</span><span class="field-value">19:50</span></div>
+            <button class="btn btn-primary" style="width:100%; margin-top:12px;">Import Data</button>
+          </div>
+          <div style="flex:1; min-width:400px;">
+            <div class="chart-area tall">
+              <div class="chart-label">
+                <div class="chart-legend"><div class="legend-line" style="background:var(--chart-blue)"></div>Original</div>
+                <div class="chart-legend"><div class="legend-line" style="background:#faad14"></div>Baseline</div>
+                <div class="chart-legend"><div class="legend-line" style="background:var(--chart-green)"></div>Filtered</div>
+              </div>
+              <div class="chart-y-axis"><span>2175</span><span>1500</span><span>1000</span><span>500</span><span>0</span></div>
+              <div class="chart-grid"><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div><div class="chart-grid-line"></div></div>
+              <svg class="chart-svg" viewBox="0 0 800 300" preserveAspectRatio="none" style="width:100%;height:100%;">
+                <line x1="0" y1="258" x2="800" y2="258" stroke="#faad14" stroke-width="1.5" stroke-dasharray="6,3"/>
+                <polyline fill="none" stroke="#4472C4" stroke-width="1.8" points="0,250 100,248 200,252 280,240 320,60 340,15 360,25 380,50 400,180 420,240 500,252 600,248 700,250 800,248"/>
+                <polyline fill="none" stroke="#70ad47" stroke-width="1.8" points="0,290 100,290 200,290 280,288 320,190 340,150 360,160 380,185 400,280 420,290 500,290 600,290 700,290 800,290"/>
+              </svg>
+              <div class="chart-x-axis"><span>19:00</span><span>19:10</span><span>19:20</span><span>19:30</span><span>19:40</span><span>19:50</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="calc-footer">
+          <div class="calc-group"><span class="calc-label">Range</span><select class="field-select"><option>Full Range</option><option>Sub Range</option></select></div>
+          <div class="calc-group"><span class="calc-label">Current</span><div class="calc-value">304502.66</div></div>
+          <div class="calc-group"><button class="btn btn-primary">Calculate</button></div>
+          <div class="calc-group"><span class="calc-label">Report</span></div>
+          <div class="calc-group"><span class="calc-label">Cumulative</span><div class="calc-value">304502.66 V·s</div></div>
+          <div class="calc-group"><span class="calc-label">Absorbed</span><div class="calc-value">134.56 Gy</div></div>
+          <div class="calc-group"><span class="calc-label">Equivalent</span><div class="calc-value">134.56 Sv</div></div>
+          <div class="calc-group"><span class="calc-label">Effective</span><div class="calc-value" style="background:#fff1f0; font-weight:700;">16.14 Sv</div></div>
+          <div class="calc-group"><button class="btn btn-primary">Export</button></div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ═══ GATEWAY MODAL ═══ -->
+<div class="modal-overlay" id="gatewayModal">
+  <div class="modal" style="width:780px;">
+    <div class="modal-header">
+      <h3>TwinTracker#192.168.0.6</h3>
+      <button class="modal-close" onclick="closeModal('gatewayModal')">✕</button>
+    </div>
+    <div class="modal-tabs">
+      <div class="modal-tab active" onclick="switchModalTab('gw-device', this)">Device</div>
+      <div class="modal-tab" onclick="switchModalTab('gw-setting', this)">Setting</div>
+    </div>
+    <div class="modal-body">
+      <!-- Device Tab -->
+      <div id="gw-device">
+        <div class="modal-section">
+          <div class="modal-section-title">Device Info</div>
+          <div class="field-row"><span class="field-label">Device Name</span><span class="field-value">TwinTracker#192.168.0.6</span></div>
+          <div class="field-row"><span class="field-label">MAC Address</span><span class="field-value">D1:FA:88:37:A0:86</span></div>
+          <div class="field-row"><span class="field-label">Device Type</span><span class="field-value">Twin Tracker BLE</span></div>
+          <div class="field-row"><span class="field-label">Status</span><span class="field-value"><span class="status-dot status-online"></span>Online</span></div>
+          <div class="field-row"><span class="field-label">Uptime</span><span class="field-value">2026-02-12 10:03:56</span></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">Server</div>
+          <div class="field-row"><span class="field-label">Server IP</span><span class="field-value">192.168.0.200</span></div>
+          <div class="field-row"><span class="field-label">Server URL</span><span class="field-value">http://192.168.0.200</span></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">TCP/IP</div>
+          <div class="field-row"><span class="field-label">IPv4</span><span class="field-value">Manual</span></div>
+          <div class="field-row"><span class="field-label">IP Address</span><span class="field-value">192.168.0.6</span></div>
+          <div class="field-row"><span class="field-label">Subnet Mask</span><span class="field-value">255.255.255.0</span></div>
+          <div class="field-row"><span class="field-label">Gateway IP Address</span><span class="field-value">192.168.0.1</span></div>
+          <div class="field-row"><span class="field-label">DNS Main Address</span><span class="field-value">192.168.0.100</span></div>
+          <div class="field-row"><span class="field-label">DNS Sub Address</span><span class="field-value">168.126.63.2</span></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">Interface</div>
+          <div class="field-row"><span class="field-label">LED</span><span class="field-value"><div class="field-toggle"></div></span></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">BLE Setting</div>
+          <div class="field-row"><span class="field-label">BLE RSSI Threshold</span><span class="field-value">-100</span></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">FW Version</div>
+          <div class="field-row"><span class="field-label">Device Firmware</span><span class="field-value">1.0.1</span></div>
+          <div class="field-row"><span class="field-label">BLE Firmware</span><span class="field-value">0.8.1</span></div>
+        </div>
+      </div>
+      <!-- Setting Tab -->
+      <div id="gw-setting" style="display:none;">
+        <div class="modal-section">
+          <div class="modal-section-title">Server</div>
+          <div class="field-row"><span class="field-label">Server IP</span><input class="field-input" value="192.168.0.200"></div>
+          <div class="field-row"><span class="field-label">Server URL</span><input class="field-input" value="http://192.168.0.200"></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">TCP/IP</div>
+          <div class="field-row"><span class="field-label">IPv4</span><select class="field-select"><option>Manual</option><option>Auto</option></select></div>
+          <div class="field-row"><span class="field-label">IP Address</span><input class="field-input" value="192.168.0.6"></div>
+          <div class="field-row"><span class="field-label">Subnet Mask</span><input class="field-input" value="255.255.255.0"></div>
+          <div class="field-row"><span class="field-label">Gateway IP</span><input class="field-input" value="192.168.0.1"></div>
+          <div class="field-row"><span class="field-label">DNS Main</span><input class="field-input" value="192.168.0.100"></div>
+          <div class="field-row"><span class="field-label">DNS Sub</span><input class="field-input" value="168.126.63.2"></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">Interface</div>
+          <div class="field-row"><span class="field-label">LED</span><span class="field-value"><div class="field-toggle"></div></span></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">BLE Setting</div>
+          <div class="field-row"><span class="field-label">BLE RSSI Threshold</span><input class="field-input" style="width:100px" value="-100"></div>
+        </div>
+        <div class="modal-section">
+          <div class="modal-section-title">FW Version</div>
+          <div class="field-row"><span class="field-label">Device Firmware</span><span class="field-value" style="display:flex;align-items:center;gap:10px;">1.0.1 <span class="upload-btn">📁 Upload FW</span></span></div>
+          <div class="field-row"><span class="field-label">BLE Firmware</span><span class="field-value" style="display:flex;align-items:center;gap:10px;">0.8.1 <span class="upload-btn">📁 Upload FW</span></span></div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+          <button class="btn" onclick="closeModal('gatewayModal')">Cancel</button>
+          <button class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ DOSIMETER MODAL ═══ -->
+<div class="modal-overlay" id="dosimeterModal">
+  <div class="modal" style="width:500px;">
+    <div class="modal-header">
+      <h3>선형가03</h3>
+      <button class="modal-close" onclick="closeModal('dosimeterModal')">✕</button>
+    </div>
+    <div class="modal-tabs">
+      <div class="modal-tab active">Device</div>
+      <div class="modal-tab">Setting</div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-title">Device Info</div>
+        <div class="field-row"><span class="field-label">Device Name</span><span class="field-value">선형가03</span></div>
+        <div class="field-row"><span class="field-label">MAC Address</span><span class="field-value">06:06:04:04:03:03</span></div>
+        <div class="field-row"><span class="field-label">Device Type</span><span class="field-value">Skin Dosimeter</span></div>
+        <div class="field-row"><span class="field-label">Voltage</span><span class="field-value">215.2825mV</span></div>
+        <div class="field-row"><span class="field-label">Signal</span><span class="field-value">-52 dBm</span></div>
+        <div class="field-row"><span class="field-label">Status</span><span class="field-value"><span class="status-dot status-online"></span>Online</span></div>
+        <div class="field-row"><span class="field-label">Battery</span><span class="field-value">3813%</span></div>
+        <div class="field-row"><span class="field-label">Uptime</span><span class="field-value">2026-02-12 10:00:40</span></div>
+      </div>
+      <div class="modal-section" style="margin-top:12px;">
+        <div class="modal-section-title">Last searched by</div>
+        <div style="display:flex;align-items:center;gap:8px; font-size:13px;">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;">T</div>
+          TwinTracker#192.168.0.6<br><span style="font-size:11px;color:var(--text-light);">2026.02.12 10:02:49</span>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+        <button class="btn" style="color:#ff4d4f; border-color:#ff4d4f;">Delete</button>
+        <button class="btn" onclick="closeModal('dosimeterModal')">Cancel</button>
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SETTING MODAL ═══ -->
+<div class="modal-overlay" id="settingModal">
+  <div class="modal" style="width:700px; min-height:450px;">
+    <div class="modal-header">
+      <h3>Setting</h3>
+      <button class="modal-close" onclick="closeModal('settingModal')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0;">
+      <div class="setting-sidebar" style="min-height:380px;">
+        <div class="setting-left">
+          <div style="padding:16px 20px; font-size:13px; font-weight:600;">Account</div>
+          <div class="setting-menu active" onclick="switchSettingTab('myaccount',this)">👤 내계정</div>
+          <div style="padding:16px 20px; font-size:13px; font-weight:600; margin-top:8px;">Workspace</div>
+          <div class="setting-menu" onclick="switchSettingTab('workspace',this)">⚙ 워크스페이스 설정</div>
+          <div class="setting-menu" onclick="switchSettingTab('users',this)">👥 사용자</div>
+        </div>
+        <div class="setting-right">
+          <div id="setting-myaccount">
+            <div style="text-align:center; margin-bottom:20px;">
+              <div style="width:64px;height:64px;border-radius:50%;background:#e0e0e0;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#999;">👤</div>
+              <div style="font-weight:600;">내 프로필</div>
+            </div>
+            <div class="field-row"><span class="field-label">사용자 이름</span><span class="field-value">관리자 <span style="color:var(--primary);cursor:pointer;font-size:12px;margin-left:8px;">변경</span></span></div>
+            <div class="field-row"><span class="field-label">권한</span><span class="field-value">관리자</span></div>
+            <div class="field-row"><span class="field-label">그룹</span><span class="field-value">없음</span></div>
+            <div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border);">
+              <div style="font-weight:600; margin-bottom:12px;">계정 및 보안</div>
+              <div class="field-row"><span class="field-label">아이디</span><span class="field-value">admin</span></div>
+              <div class="field-row"><span class="field-label">비밀번호</span><span class="field-value"><span style="color:var(--primary);cursor:pointer;font-size:12px;">비밀번호 변경</span></span></div>
+            </div>
+          </div>
+          <div id="setting-workspace" style="display:none;">
+            <div style="font-weight:600; margin-bottom:16px;">워크스페이스 설정</div>
+            <div class="field-row"><span class="field-label">이름</span><input class="field-input" value="Default Workspace"></div>
+          </div>
+          <div id="setting-users" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+              <div>
+                <span style="font-weight:600; cursor:pointer; border-bottom:2px solid var(--primary); padding-bottom:4px; margin-right:16px;">사용자</span>
+                <span style="color:var(--text-light); cursor:pointer;">그룹</span>
+              </div>
+              <button class="btn btn-primary" style="font-size:12px;">+ 사용자 추가</button>
+            </div>
+            <table style="font-size:13px;">
+              <thead><tr><th>사용자 이름</th><th>권한</th><th>계정 타입</th><th>그룹</th><th></th></tr></thead>
+              <tbody>
+                <tr><td>👤 관리자</td><td>관리자</td><td>Local Account</td><td>없음</td><td>⋯</td></tr>
+                <tr><td>👤 최고관리자</td><td>관리자-소유자</td><td>Local Account</td><td>없음</td><td>⋯</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function doLogin() {
+  document.getElementById('loginScreen').classList.remove('active');
+  document.getElementById('mainApp').style.display = 'flex';
+}
+
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  const titles = { 'device':'Device', 'monitoring':'Data Monitoring', 'calibration':'Calibration', 'manage-cal':'Manage Calibration', 'analysis':'Data Analysis' };
+  document.getElementById('headerTitle').textContent = titles[name] || name;
+}
+
+function switchDeviceTab(tab, el) {
+  document.getElementById('tab-dosimeter').style.display = tab === 'dosimeter' ? 'block' : 'none';
+  document.getElementById('tab-gateway').style.display = tab === 'gateway' ? 'block' : 'none';
+  el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function switchModalTab(tabId, el) {
+  const modal = el.closest('.modal');
+  modal.querySelectorAll('.modal-body > div').forEach(d => d.style.display = 'none');
+  document.getElementById(tabId).style.display = 'block';
+  el.parentElement.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function switchSettingTab(tabId, el) {
+  ['myaccount','workspace','users'].forEach(id => {
+    document.getElementById('setting-' + id).style.display = id === tabId ? 'block' : 'none';
+  });
+  el.closest('.setting-left').querySelectorAll('.setting-menu').forEach(m => m.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// Close modal on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('show');
+  });
+});
+</script>
+</body>
+</html>

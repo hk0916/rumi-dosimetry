@@ -1,0 +1,171 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id        Int       @id @default(autoincrement())
+  name      String    @db.VarChar(100)
+  createdAt DateTime  @default(now()) @map("created_at")
+  users     User[]
+  devices   Device[]
+  gateways  Gateway[]
+
+  @@map("workspaces")
+}
+
+model User {
+  id           Int           @id @default(autoincrement())
+  username     String        @unique @db.VarChar(50)
+  passwordHash String        @map("password_hash") @db.VarChar(255)
+  name         String?       @db.VarChar(100)
+  role         UserRole      @default(admin)
+  accountType  String?       @map("account_type") @db.VarChar(50)
+  groupName    String?       @map("group_name") @db.VarChar(100)
+  workspaceId  Int?          @map("workspace_id")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  workspace    Workspace?    @relation(fields: [workspaceId], references: [id])
+  calibrations Calibration[]
+  analyses     AnalysisResult[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  admin
+  super_admin
+}
+
+model Device {
+  id          Int           @id @default(autoincrement())
+  deviceName  String        @map("device_name") @db.VarChar(100)
+  deviceType  String?       @map("device_type") @db.VarChar(50)
+  macAddress  String        @unique @map("mac_address") @db.VarChar(17)
+  status      DeviceStatus  @default(offline)
+  battery     Int?
+  rssi        Int?
+  voltage     Decimal?      @db.Decimal(10, 4)
+  uptime      DateTime?
+  workspaceId Int?          @map("workspace_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  workspace   Workspace?    @relation(fields: [workspaceId], references: [id])
+  sensorData  SensorData[]
+  calibrations Calibration[]
+
+  @@map("devices")
+}
+
+enum DeviceStatus {
+  online
+  offline
+}
+
+model Gateway {
+  id               Int           @id @default(autoincrement())
+  deviceName       String        @map("device_name") @db.VarChar(100)
+  deviceType       String?       @map("device_type") @db.VarChar(50)
+  macAddress       String        @unique @map("mac_address") @db.VarChar(17)
+  status           DeviceStatus  @default(offline)
+  serverIp         String?       @map("server_ip") @db.VarChar(45)
+  serverUrl        String?       @map("server_url") @db.VarChar(255)
+  ipv4Mode         Ipv4Mode      @default(manual) @map("ipv4_mode")
+  ipAddress        String?       @map("ip_address") @db.VarChar(45)
+  subnetMask       String?       @map("subnet_mask") @db.VarChar(45)
+  gatewayIp        String?       @map("gateway_ip") @db.VarChar(45)
+  dnsMain          String?       @map("dns_main") @db.VarChar(45)
+  dnsSub           String?       @map("dns_sub") @db.VarChar(45)
+  interfaceType    String?       @map("interface_type") @db.VarChar(50)
+  ledEnabled       Boolean       @default(true) @map("led_enabled")
+  bleRssiThreshold Int?          @map("ble_rssi_threshold")
+  deviceFwVersion  String?       @map("device_fw_version") @db.VarChar(50)
+  bleFwVersion     String?       @map("ble_fw_version") @db.VarChar(50)
+  uptime           DateTime?
+  workspaceId      Int?          @map("workspace_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  workspace        Workspace?    @relation(fields: [workspaceId], references: [id])
+
+  @@map("gateways")
+}
+
+enum Ipv4Mode {
+  manual
+  auto
+}
+
+model SensorData {
+  id        BigInt   @id @default(autoincrement())
+  deviceId  Int      @map("device_id")
+  timestamp DateTime @db.DateTime(3)
+  voltage   Decimal? @db.Decimal(10, 4)
+  createdAt DateTime @default(now()) @map("created_at")
+  device    Device   @relation(fields: [deviceId], references: [id])
+
+  @@index([deviceId, timestamp])
+  @@map("sensor_data")
+}
+
+model Calibration {
+  id             Int              @id @default(autoincrement())
+  deviceId       Int              @map("device_id")
+  userId         Int              @map("user_id")
+  date           DateTime?        @db.Date
+  filterType     String?          @map("filter_type") @db.VarChar(30)
+  windowSize     Int?             @map("window_size")
+  baseline       Decimal?         @db.Decimal(10, 4)
+  startTime      DateTime?        @map("start_time") @db.DateTime(3)
+  endTime        DateTime?        @map("end_time") @db.DateTime(3)
+  cumulativeDose Decimal?         @map("cumulative_dose") @db.Decimal(15, 4)
+  deliveredDose  Decimal?         @map("delivered_dose") @db.Decimal(10, 4)
+  cfFactor       Decimal?         @map("cf_factor") @db.Decimal(10, 4)
+  cfName         String?          @map("cf_name") @db.VarChar(100)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  device         Device           @relation(fields: [deviceId], references: [id])
+  user           User             @relation(fields: [userId], references: [id])
+  analyses       AnalysisResult[]
+
+  @@map("calibrations")
+}
+
+model AnalysisResult {
+  id              Int       @id @default(autoincrement())
+  calibrationId   Int       @map("calibration_id")
+  userId          Int       @map("user_id")
+  radiationSource String?   @map("radiation_source") @db.VarChar(50)
+  targetOrgan     String?   @map("target_organ") @db.VarChar(50)
+  rangeType       String?   @map("range_type") @db.VarChar(10)
+  subRangeStart   DateTime? @map("sub_range_start") @db.DateTime(3)
+  subRangeEnd     DateTime? @map("sub_range_end") @db.DateTime(3)
+  cumulativeDose  Decimal?  @map("cumulative_dose") @db.Decimal(15, 6)
+  absorbedDose    Decimal?  @map("absorbed_dose") @db.Decimal(15, 6)
+  equivalentDose  Decimal?  @map("equivalent_dose") @db.Decimal(15, 6)
+  effectiveDose   Decimal?  @map("effective_dose") @db.Decimal(15, 6)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  calibration     Calibration @relation(fields: [calibrationId], references: [id])
+  user            User        @relation(fields: [userId], references: [id])
+
+  @@map("analysis_results")
+}
+
+model RadiationWeightingFactor {
+  id              Int     @id @default(autoincrement())
+  radiationSource String  @map("radiation_source") @db.VarChar(50)
+  weightingFactor Decimal @map("weighting_factor") @db.Decimal(10, 4)
+
+  @@map("radiation_weighting_factors")
+}
+
+model TissueWeightingFactor {
+  id              Int     @id @default(autoincrement())
+  organName       String  @map("organ_name") @db.VarChar(50)
+  weightingFactor Decimal @map("weighting_factor") @db.Decimal(10, 6)
+
+  @@map("tissue_weighting_factors")
+}

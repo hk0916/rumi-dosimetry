@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env.local
+*.log
+.DS_Store
+dosimetry/mysql_data/
+dosimetry/backend/node_modules/
+dosimetry/frontend/node_modules/
+__pycache__/
+*.pyc
