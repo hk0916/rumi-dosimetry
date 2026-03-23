@@ -6,6 +6,8 @@ import MonitoringPage from "./pages/MonitoringPage";
 import CalibrationPage from "./pages/CalibrationPage";
 import ManageCalibrationPage from "./pages/ManageCalibrationPage";
 import DataAnalysisPage from "./pages/DataAnalysisPage";
+import UserSettingsPage from "./pages/UserSettingsPage";
+import OtaPage from "./pages/OtaPage";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("token");
@@ -29,6 +31,8 @@ export default function App() {
         <Route path="calibration" element={<CalibrationPage />} />
         <Route path="manage-calibration" element={<ManageCalibrationPage />} />
         <Route path="data-analysis" element={<DataAnalysisPage />} />
+        <Route path="ota" element={<OtaPage />} />
+        <Route path="settings" element={<UserSettingsPage />} />
         <Route index element={<Navigate to="device" />} />
       </Route>
       <Route path="*" element={<Navigate to="/dosimetry/device" />} />

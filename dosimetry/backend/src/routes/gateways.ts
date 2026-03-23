@@ -2,18 +2,22 @@ import { FastifyInstance } from "fastify";
 import { prisma } from "../index.js";
 
 export async function gatewayRoutes(app: FastifyInstance) {
+  // 모든 라우트에 인증 적용
+  app.addHook("onRequest", (app as any).authenticate);
+
   // GET /api/gateways
   app.get("/", async (request) => {
     const { page = "1", size = "20" } = request.query as Record<string, string>;
-    const skip = (Number(page) - 1) * Number(size);
-    const take = Number(size);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const sizeNum = Math.min(100, Math.max(1, parseInt(size, 10) || 20));
+    const skip = (pageNum - 1) * sizeNum;
 
     const [gateways, total] = await Promise.all([
-      prisma.gateway.findMany({ skip, take, orderBy: { updatedAt: "desc" } }),
+      prisma.gateway.findMany({ skip, take: sizeNum, orderBy: { updatedAt: "desc" } }),
       prisma.gateway.count(),
     ]);
 
-    return { data: gateways, total, page: Number(page), size: take };
+    return { data: gateways, total, page: pageNum, size: sizeNum };
   });
 
   // GET /api/gateways/:id
@@ -25,26 +29,36 @@ export async function gatewayRoutes(app: FastifyInstance) {
   });
 
   // POST /api/gateways
-  app.post("/", async (request) => {
+  app.post("/", async (request, reply) => {
     const body = request.body as any;
-    const gateway = await prisma.gateway.create({
-      data: {
-        deviceName: body.deviceName,
-        deviceType: body.deviceType || "Twin Tracker BLE",
-        macAddress: body.macAddress,
-        serverIp: body.serverIp,
-        serverUrl: body.serverUrl,
-        ipv4Mode: body.ipv4Mode || "manual",
-        ipAddress: body.ipAddress,
-        subnetMask: body.subnetMask,
-        gatewayIp: body.gatewayIp,
-        dnsMain: body.dnsMain,
-        dnsSub: body.dnsSub,
-        bleRssiThreshold: body.bleRssiThreshold || -100,
-        workspaceId: body.workspaceId || 1,
-      },
-    });
-    return gateway;
+    if (!body.deviceName || !body.macAddress) {
+      return reply.status(400).send({ error: "deviceName과 macAddress는 필수입니다." });
+    }
+    try {
+      const gateway = await prisma.gateway.create({
+        data: {
+          deviceName: body.deviceName,
+          deviceType: body.deviceType || "Twin Tracker BLE",
+          macAddress: body.macAddress,
+          serverIp: body.serverIp,
+          serverUrl: body.serverUrl,
+          ipv4Mode: body.ipv4Mode || "manual",
+          ipAddress: body.ipAddress,
+          subnetMask: body.subnetMask,
+          gatewayIp: body.gatewayIp,
+          dnsMain: body.dnsMain,
+          dnsSub: body.dnsSub,
+          bleRssiThreshold: body.bleRssiThreshold ?? -100,
+          workspaceId: body.workspaceId || 1,
+        },
+      });
+      return gateway;
+    } catch (err: any) {
+      if (err.code === "P2002") {
+        return reply.status(409).send({ error: "이미 등록된 MAC 주소입니다." });
+      }
+      throw err;
+    }
   });
 
   // PUT /api/gateways/:id/settings
@@ -52,25 +66,29 @@ export async function gatewayRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const body = request.body as any;
     try {
+      const data: any = {};
+      if (body.serverIp !== undefined) data.serverIp = body.serverIp;
+      if (body.serverUrl !== undefined) data.serverUrl = body.serverUrl;
+      if (body.ipv4Mode !== undefined) data.ipv4Mode = body.ipv4Mode;
+      if (body.ipAddress !== undefined) data.ipAddress = body.ipAddress;
+      if (body.subnetMask !== undefined) data.subnetMask = body.subnetMask;
+      if (body.gatewayIp !== undefined) data.gatewayIp = body.gatewayIp;
+      if (body.dnsMain !== undefined) data.dnsMain = body.dnsMain;
+      if (body.dnsSub !== undefined) data.dnsSub = body.dnsSub;
+      if (body.interfaceType !== undefined) data.interfaceType = body.interfaceType;
+      if (body.ledEnabled !== undefined) data.ledEnabled = body.ledEnabled;
+      if (body.bleRssiThreshold !== undefined) data.bleRssiThreshold = body.bleRssiThreshold;
+
       const gateway = await prisma.gateway.update({
         where: { id: Number(id) },
-        data: {
-          serverIp: body.serverIp,
-          serverUrl: body.serverUrl,
-          ipv4Mode: body.ipv4Mode,
-          ipAddress: body.ipAddress,
-          subnetMask: body.subnetMask,
-          gatewayIp: body.gatewayIp,
-          dnsMain: body.dnsMain,
-          dnsSub: body.dnsSub,
-          interfaceType: body.interfaceType,
-          ledEnabled: body.ledEnabled,
-          bleRssiThreshold: body.bleRssiThreshold,
-        },
+        data,
       });
       return gateway;
-    } catch {
-      return reply.status(404).send({ error: "Gateway not found" });
+    } catch (err: any) {
+      if (err.code === "P2025") {
+        return reply.status(404).send({ error: "Gateway not found" });
+      }
+      throw err;
     }
   });
 
@@ -80,8 +98,11 @@ export async function gatewayRoutes(app: FastifyInstance) {
     try {
       await prisma.gateway.delete({ where: { id: Number(id) } });
       return { message: "삭제되었습니다." };
-    } catch {
-      return reply.status(404).send({ error: "Gateway not found" });
+    } catch (err: any) {
+      if (err.code === "P2025") {
+        return reply.status(404).send({ error: "Gateway not found" });
+      }
+      throw err;
     }
   });
 }

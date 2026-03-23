@@ -8,3 +8,4 @@ dosimetry/backend/node_modules/
 dosimetry/frontend/node_modules/
 __pycache__/
 *.pyc
+dosimetry/backups/

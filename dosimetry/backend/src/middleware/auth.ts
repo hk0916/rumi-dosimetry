@@ -8,7 +8,7 @@ export function authMiddleware(app: FastifyInstance) {
     try {
       await request.jwtVerify();
     } catch (err) {
-      reply.status(401).send({ error: "Unauthorized" });
+      return reply.status(401).send({ error: "Unauthorized" });
     }
   };
 }

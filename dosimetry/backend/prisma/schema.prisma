@@ -154,6 +154,47 @@ model AnalysisResult {
   @@map("analysis_results")
 }
 
+model OtaFirmware {
+  id          Int          @id @default(autoincrement())
+  name        String       @db.VarChar(100)
+  version     String       @db.VarChar(50)
+  targetType  String       @map("target_type") @db.VarChar(20) // gateway, device
+  fileName    String?      @map("file_name") @db.VarChar(255)
+  fileSize    Int?         @map("file_size")
+  checksum    String?      @db.VarChar(64)
+  description String?      @db.Text
+  createdAt   DateTime     @default(now()) @map("created_at")
+  tasks       OtaTask[]
+
+  @@map("ota_firmwares")
+}
+
+model OtaTask {
+  id           Int        @id @default(autoincrement())
+  firmwareId   Int        @map("firmware_id")
+  targetType   String     @map("target_type") @db.VarChar(20) // gateway, device
+  targetId     Int        @map("target_id")
+  targetName   String?    @map("target_name") @db.VarChar(100)
+  status       OtaStatus  @default(pending)
+  params       String?    @db.Text // JSON: filter values, config overrides, etc.
+  progress     Int        @default(0)
+  errorMessage String?    @map("error_message") @db.Text
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  firmware     OtaFirmware @relation(fields: [firmwareId], references: [id])
+
+  @@index([targetType, targetId])
+  @@map("ota_tasks")
+}
+
+enum OtaStatus {
+  pending
+  in_progress
+  success
+  failed
+  cancelled
+}
+
 model RadiationWeightingFactor {
   id              Int     @id @default(autoincrement())
   radiationSource String  @map("radiation_source") @db.VarChar(50)

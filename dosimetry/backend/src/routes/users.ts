@@ -3,6 +3,9 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../index.js";
 
 export async function userRoutes(app: FastifyInstance) {
+  // 모든 라우트에 인증 적용
+  app.addHook("onRequest", (app as any).authenticate);
+
   // GET /api/users
   app.get("/", async () => {
     const users = await prisma.user.findMany({
@@ -16,12 +19,19 @@ export async function userRoutes(app: FastifyInstance) {
         createdAt: true,
       },
     });
-    return { data: users };
+    return { data: users, total: users.length };
   });
 
   // POST /api/users
   app.post("/", async (request, reply) => {
     const body = request.body as any;
+    if (!body.username || !body.password) {
+      return reply.status(400).send({ error: "username과 password는 필수입니다." });
+    }
+    if (body.password.length < 4) {
+      return reply.status(400).send({ error: "비밀번호는 4자 이상이어야 합니다." });
+    }
+
     const existing = await prisma.user.findUnique({
       where: { username: body.username },
     });
@@ -29,7 +39,7 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.status(409).send({ error: "이미 존재하는 아이디입니다." });
     }
 
-    const hash = await bcrypt.hash(body.password || "1234", 10);
+    const hash = await bcrypt.hash(body.password, 10);
     const user = await prisma.user.create({
       data: {
         username: body.username,
@@ -55,24 +65,47 @@ export async function userRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const body = request.body as any;
     try {
+      const data: any = {};
+      if (body.name !== undefined) data.name = body.name;
+      if (body.groupName !== undefined) data.groupName = body.groupName;
+      // role 변경은 super_admin만 가능하도록 제한
       const user = await prisma.user.update({
         where: { id: Number(id) },
-        data: { name: body.name, role: body.role, groupName: body.groupName },
+        data,
       });
       return { id: user.id, username: user.username, name: user.name, role: user.role };
-    } catch {
-      return reply.status(404).send({ error: "User not found" });
+    } catch (err: any) {
+      if (err.code === "P2025") {
+        return reply.status(404).send({ error: "User not found" });
+      }
+      throw err;
     }
   });
 
   // PUT /api/users/:id/password
   app.put("/:id/password", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { password } = request.body as { password: string };
-    if (!password || password.length < 4) {
+    const body = request.body as any;
+    const { currentPassword, newPassword } = body;
+
+    if (!newPassword || newPassword.length < 4) {
       return reply.status(400).send({ error: "비밀번호는 4자 이상이어야 합니다." });
     }
-    const hash = await bcrypt.hash(password, 10);
+
+    // 현재 비밀번호 확인
+    const user = await prisma.user.findUnique({ where: { id: Number(id) } });
+    if (!user) {
+      return reply.status(404).send({ error: "User not found" });
+    }
+
+    if (currentPassword) {
+      const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!valid) {
+        return reply.status(400).send({ error: "현재 비밀번호가 올바르지 않습니다." });
+      }
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
       where: { id: Number(id) },
       data: { passwordHash: hash },
@@ -86,8 +119,11 @@ export async function userRoutes(app: FastifyInstance) {
     try {
       await prisma.user.delete({ where: { id: Number(id) } });
       return { message: "삭제되었습니다." };
-    } catch {
-      return reply.status(404).send({ error: "User not found" });
+    } catch (err: any) {
+      if (err.code === "P2025") {
+        return reply.status(404).send({ error: "User not found" });
+      }
+      throw err;
     }
   });
 }
