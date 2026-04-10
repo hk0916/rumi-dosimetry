@@ -30,7 +30,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
         app.log.info(`WS client disconnected for device ${devId}`);
       });
 
-      socket.on("error", (err) => {
+      socket.on("error", (err: Error) => {
         app.log.error(`WS error for device ${devId}: ${err.message}`);
         wsClients.get(devId)?.delete(socket);
       });
