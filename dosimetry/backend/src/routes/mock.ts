@@ -54,13 +54,24 @@ export async function mockRoutes(app: FastifyInstance) {
           const battery = Math.max(0, 100 - Math.floor(tick / 60));
           const rssi = -50 - Math.floor(Math.random() * 20);
 
+          const temperature = 2200 + Math.floor(Math.random() * 300);
+          const advertisingCount = tick * 3;
+
           await prisma.device.update({
             where: { id: device.id },
-            data: { status: "online", voltage, rssi, battery, uptime: new Date() },
+            data: {
+              status: "online", voltage, rssi, battery,
+              temperature, txPower: -4, advertisingCount, localName: "P_LAB",
+              uptime: new Date(),
+            },
           });
 
           const sensorData = await prisma.sensorData.create({
-            data: { deviceId: device.id, timestamp: new Date(), voltage },
+            data: {
+              deviceId: device.id, timestamp: new Date(), voltage,
+              rssi, battery, temperature, advertisingCount,
+              scanTick: tick * 5000000, gatewayMac: gatewayMac,
+            },
           });
 
           // WebSocket 전파
