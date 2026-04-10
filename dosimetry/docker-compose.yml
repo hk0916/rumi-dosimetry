@@ -23,9 +23,6 @@ services:
     env_file: .env
     ports:
       - "5102:4000"
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
     depends_on:
       db:
         condition: service_healthy
@@ -37,9 +34,6 @@ services:
     restart: unless-stopped
     ports:
       - "80:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     depends_on:
       - backend
     environment:
