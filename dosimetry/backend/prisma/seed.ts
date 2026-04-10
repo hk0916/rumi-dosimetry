@@ -262,7 +262,7 @@ async function main() {
         battery,
         temperature,
         advertisingCount: i * 3,
-        scanTick: (i % 400) * 5000,
+        scanTick: i % 1000,
         gatewayMac: gateways[Math.floor(Math.random() * 2)].macAddress,
       });
     }
