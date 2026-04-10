@@ -78,6 +78,10 @@ export async function gatewayRoutes(app: FastifyInstance) {
       if (body.interfaceType !== undefined) data.interfaceType = body.interfaceType;
       if (body.ledEnabled !== undefined) data.ledEnabled = body.ledEnabled;
       if (body.bleRssiThreshold !== undefined) data.bleRssiThreshold = body.bleRssiThreshold;
+      if (body.otaServerUrl !== undefined) data.otaServerUrl = body.otaServerUrl;
+      if (body.otaFileName !== undefined) data.otaFileName = body.otaFileName;
+      if (body.wsServerUrl !== undefined) data.wsServerUrl = body.wsServerUrl;
+      if (body.reportInterval !== undefined) data.reportInterval = body.reportInterval;
 
       const gateway = await prisma.gateway.update({
         where: { id: Number(id) },

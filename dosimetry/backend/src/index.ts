@@ -13,6 +13,7 @@ import { mockRoutes } from "./routes/mock.js";
 import { calibrationRoutes } from "./routes/calibrations.js";
 import { analysisRoutes } from "./routes/analysis.js";
 import { otaRoutes } from "./routes/ota.js";
+import { gatewayWsRoutes } from "./routes/gateway-ws.js";
 import { authMiddleware } from "./middleware/auth.js";
 
 export const prisma = new PrismaClient();
@@ -35,6 +36,7 @@ async function start() {
   await app.register(userRoutes, { prefix: "/api/users" });
   await app.register(dataRoutes, { prefix: "/api/data" });
   await app.register(monitoringRoutes, { prefix: "/ws" });
+  await app.register(gatewayWsRoutes, { prefix: "/ws" });
   await app.register(mockRoutes, { prefix: "/api/mock" });
   await app.register(calibrationRoutes, { prefix: "/api/calibrations" });
   await app.register(analysisRoutes, { prefix: "/api/analysis" });
