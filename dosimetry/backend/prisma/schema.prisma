@@ -42,21 +42,25 @@ enum UserRole {
 }
 
 model Device {
-  id          Int           @id @default(autoincrement())
-  deviceName  String        @map("device_name") @db.VarChar(100)
-  deviceType  String?       @map("device_type") @db.VarChar(50)
-  macAddress  String        @unique @map("mac_address") @db.VarChar(17)
-  status      DeviceStatus  @default(offline)
-  battery     Int?
-  rssi        Int?
-  voltage     Decimal?      @db.Decimal(10, 4)
-  uptime      DateTime?
-  workspaceId Int?          @map("workspace_id")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-  workspace   Workspace?    @relation(fields: [workspaceId], references: [id])
-  sensorData  SensorData[]
-  calibrations Calibration[]
+  id               Int           @id @default(autoincrement())
+  deviceName       String        @map("device_name") @db.VarChar(100)
+  deviceType       String?       @map("device_type") @db.VarChar(50)
+  macAddress       String        @unique @map("mac_address") @db.VarChar(17)
+  status           DeviceStatus  @default(offline)
+  battery          Int?
+  rssi             Int?
+  voltage          Decimal?      @db.Decimal(10, 4)
+  temperature      Int?                                        // Tag Beacon: temp high/low combined
+  txPower          Int?          @map("tx_power")              // Tag Beacon: Tx Power Level (dBm)
+  advertisingCount Int?          @map("advertising_count")     // Tag Beacon: 4 bytes counter
+  localName        String?       @map("local_name") @db.VarChar(50)  // Tag Beacon: e.g. "P_LAB"
+  uptime           DateTime?
+  workspaceId      Int?          @map("workspace_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  workspace        Workspace?    @relation(fields: [workspaceId], references: [id])
+  sensorData       SensorData[]
+  calibrations     Calibration[]
 
   @@map("devices")
 }
@@ -104,12 +108,18 @@ enum Ipv4Mode {
 }
 
 model SensorData {
-  id        BigInt   @id @default(autoincrement())
-  deviceId  Int      @map("device_id")
-  timestamp DateTime @db.DateTime(3)
-  voltage   Decimal? @db.Decimal(10, 4)
-  createdAt DateTime @default(now()) @map("created_at")
-  device    Device   @relation(fields: [deviceId], references: [id])
+  id               BigInt   @id @default(autoincrement())
+  deviceId         Int      @map("device_id")
+  timestamp        DateTime @db.DateTime(3)
+  voltage          Decimal? @db.Decimal(10, 4)
+  rssi             Int?                                        // 수신 RSSI (dBm)
+  battery          Int?                                        // Battery %
+  temperature      Int?                                        // temp high/low combined
+  advertisingCount Int?     @map("advertising_count")          // 4 bytes counter
+  scanTick         Int?     @map("scan_tick")                  // microseconds
+  gatewayMac       String?  @map("gateway_mac") @db.VarChar(17) // 수신 Gateway MAC
+  createdAt        DateTime @default(now()) @map("created_at")
+  device           Device   @relation(fields: [deviceId], references: [id])
 
   @@index([deviceId, timestamp])
   @@map("sensor_data")

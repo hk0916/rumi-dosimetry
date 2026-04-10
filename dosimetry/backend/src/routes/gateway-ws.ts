@@ -336,6 +336,10 @@ async function handleTagDataIndication(app: FastifyInstance, socket: any, packet
         voltage,
         rssi: tag.rssi,
         battery: tag.beacon.battery,
+        temperature: tag.beacon.temperature,
+        txPower: tag.beacon.txPower,
+        advertisingCount: tag.beacon.advertisingCount,
+        localName: tag.beacon.localName,
         uptime: new Date(),
       },
     });
@@ -346,6 +350,12 @@ async function handleTagDataIndication(app: FastifyInstance, socket: any, packet
         deviceId: device.id,
         timestamp: new Date(),
         voltage,
+        rssi: tag.rssi,
+        battery: tag.beacon.battery,
+        temperature: tag.beacon.temperature,
+        advertisingCount: tag.beacon.advertisingCount,
+        scanTick: tag.scanTick,
+        gatewayMac: gwMac,
       },
     });
 
