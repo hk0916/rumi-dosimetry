@@ -308,7 +308,7 @@ export function parseDoseDataIndication(data: Buffer): DoseDataIndication {
   const btMacAddr = parseMac(data, offset); offset += 6;
   const rssi = data.readInt8(offset); offset += 1;
   const battery = data.readUInt8(offset); offset += 1;
-  const temperature = data.readFloatBE(offset); offset += 4;
+  const temperature = data.readFloatLE(offset); offset += 4;
   const dataCount = data.readUInt8(offset); offset += 1;
 
   const doseData: DoseDataEntry[] = [];
