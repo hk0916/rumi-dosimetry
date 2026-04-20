@@ -9,7 +9,7 @@ import { gatewayRoutes } from "./routes/gateways.js";
 import { userRoutes } from "./routes/users.js";
 import { dataRoutes } from "./routes/data.js";
 import { monitoringRoutes } from "./routes/monitoring.js";
-import { mockRoutes } from "./routes/mock.js";
+
 import { calibrationRoutes } from "./routes/calibrations.js";
 import { analysisRoutes } from "./routes/analysis.js";
 import { otaRoutes } from "./routes/ota.js";
@@ -40,7 +40,7 @@ async function start() {
   await app.register(dataRoutes, { prefix: "/api/data" });
   await app.register(monitoringRoutes, { prefix: "/ws" });
   await app.register(gatewayWsRoutes, { prefix: "/ws" });
-  await app.register(mockRoutes, { prefix: "/api/mock" });
+
   await app.register(calibrationRoutes, { prefix: "/api/calibrations" });
   await app.register(analysisRoutes, { prefix: "/api/analysis" });
   await app.register(otaRoutes, { prefix: "/api/ota" });

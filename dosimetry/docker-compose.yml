@@ -6,6 +6,8 @@ services:
     env_file: .env
     ports:
       - "3306:3306"
+    environment:
+      - TZ=Asia/Seoul
     volumes:
       - ./mysql_data:/var/lib/mysql
       - ./backend/prisma/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -26,7 +28,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "npx prisma db push && npx prisma db seed && npm run dev"
+    environment:
+      - TZ=Asia/Seoul
+    command: sh -c "npx prisma db push --accept-data-loss && npm run dev"
 
   frontend:
     build: ./frontend

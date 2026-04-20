@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
-  Select, Button, Card, Space, Tag, InputNumber, message, Typography,
+  Select, Button, Card, Space, Tag, message,
   DatePicker, Table, Statistic, Row, Col, Tabs,
 } from "antd";
 import {
-  PlayCircleOutlined, PauseCircleOutlined, ThunderboltOutlined,
+  PlayCircleOutlined, PauseCircleOutlined,
   DownloadOutlined, SearchOutlined, ReloadOutlined,
 } from "@ant-design/icons";
 import ReactECharts from "echarts-for-react";
@@ -32,8 +32,6 @@ export default function MonitoringPage() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
   const [liveData, setLiveData] = useState<DataPoint[]>([]);
-  const [mockRunning, setMockRunning] = useState(false);
-  const [mockInterval, setMockInterval] = useState(1000);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Historical data
@@ -47,7 +45,6 @@ export default function MonitoringPage() {
   useEffect(() => {
     api.get("/devices").then(({ data }) => setDevices(data.data));
     api.get("/gateways").then(({ data }) => setGateways(data.data));
-    api.get("/mock/status").then(({ data }) => setMockRunning(data.running)).catch(() => {});
     return () => { wsRef.current?.close(); };
   }, []);
 
@@ -102,34 +99,6 @@ export default function MonitoringPage() {
   const handleStop = () => {
     wsRef.current?.close();
     setRunning(false);
-  };
-
-  const handleMockStart = async () => {
-    if (!gateways.length || !devices.length) {
-      message.warning("Gateway와 Device가 최소 1개 이상 등록되어야 합니다.");
-      return;
-    }
-    try {
-      await api.post("/mock/start", {
-        gatewayMac: gateways[0].macAddress,
-        deviceMacs: devices.map((d: any) => d.macAddress),
-        intervalMs: mockInterval,
-      });
-      setMockRunning(true);
-      message.success("Mock 데이터 생성이 시작되었습니다.");
-    } catch {
-      message.error("Mock 데이터 시작에 실패했습니다.");
-    }
-  };
-
-  const handleMockStop = async () => {
-    try {
-      await api.post("/mock/stop");
-      setMockRunning(false);
-      message.success("Mock 데이터 생성이 중지되었습니다.");
-    } catch {
-      message.error("Mock 중지에 실패했습니다.");
-    }
   };
 
   // Historical data query
@@ -325,32 +294,7 @@ export default function MonitoringPage() {
             }} />
           </Space>
 
-          {/* Mock Data Controls */}
-          <Space wrap>
-            <Tag color={mockRunning ? "green" : "default"}>
-              Mock {mockRunning ? "Running" : "Stopped"}
-            </Tag>
-            <InputNumber
-              min={100} max={10000} step={100}
-              value={mockInterval}
-              onChange={(v) => v && setMockInterval(v)}
-              addonAfter="ms"
-              style={{ width: 130 }}
-              size="small"
-              disabled={mockRunning}
-            />
-            {!mockRunning ? (
-              <Button icon={<ThunderboltOutlined />} onClick={handleMockStart} size="small">Mock Start</Button>
-            ) : (
-              <Button danger onClick={handleMockStop} size="small">Mock Stop</Button>
-            )}
-          </Space>
         </div>
-        {mockRunning && (
-          <Typography.Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: "block" }}>
-            Gateway: {gateways[0]?.deviceName} / Devices: {devices.map((d: any) => d.deviceName).join(", ")}
-          </Typography.Text>
-        )}
       </Card>
 
       <Tabs

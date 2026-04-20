@@ -49,10 +49,10 @@ model Device {
   status           DeviceStatus  @default(offline)
   battery          Int?
   rssi             Int?
-  voltage          Decimal?      @db.Decimal(10, 4)
+  voltage          Float?
   temperature      Int?                                        // Tag Beacon: temp high/low combined
   txPower          Int?          @map("tx_power")              // Tag Beacon: Tx Power Level (dBm)
-  advertisingCount Int?          @map("advertising_count")     // Tag Beacon: 4 bytes counter
+  advertisingCount Float?        @map("advertising_count")     // Tag Beacon: 4 bytes counter (uint32)
   localName        String?       @map("local_name") @db.VarChar(50)  // Tag Beacon: e.g. "P_LAB"
   uptime           DateTime?
   workspaceId      Int?          @map("workspace_id")
@@ -111,11 +111,11 @@ model SensorData {
   id               BigInt   @id @default(autoincrement())
   deviceId         Int      @map("device_id")
   timestamp        DateTime @db.DateTime(3)
-  voltage          Decimal? @db.Decimal(10, 4)
+  voltage          Float?
   rssi             Int?                                        // 수신 RSSI (dBm)
   battery          Int?                                        // Battery %
   temperature      Int?                                        // temp high/low combined
-  advertisingCount Int?     @map("advertising_count")          // 4 bytes counter
+  advertisingCount Float?   @map("advertising_count")          // 4 bytes counter (uint32)
   scanTick         Int?     @map("scan_tick")                  // microseconds
   gatewayMac       String?  @map("gateway_mac") @db.VarChar(17) // 수신 Gateway MAC
   createdAt        DateTime @default(now()) @map("created_at")
