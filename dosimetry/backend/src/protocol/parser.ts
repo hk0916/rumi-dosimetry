@@ -2,7 +2,7 @@
  * Lumi 바이너리 프로토콜 파서
  * Gateway -> Server 수신 데이터를 파싱
  */
-import { CMD, DIR, HEADER_SIZE, TAG_BEACON } from "./constants.js";
+import { CMD, DIR, HEADER_SIZE, TAG_BEACON, VALID_CMDS, VALID_DIRS, MAX_PACKET_LENGTH } from "./constants.js";
 
 export interface ProtocolPacket {
   dataType: number;
@@ -106,15 +106,45 @@ export function parsePacket(buf: Buffer): ProtocolPacket | null {
 }
 
 /**
- * 수신 버퍼에서 패킷 경계를 찾아 파싱 (스트림 누적 처리)
+ * 현재 위치가 유효한 패킷 헤더인지 검증
  */
-export function extractPackets(buf: Buffer): { packets: ProtocolPacket[]; remaining: Buffer } {
+function isValidHeader(buf: Buffer, offset: number): boolean {
+  if (buf.length - offset < 2) return false;
+  const cmd = buf.readUInt8(offset);
+  const dir = buf.readUInt8(offset + 1);
+  if (!VALID_CMDS.has(cmd) || !VALID_DIRS.has(dir)) return false;
+
+  // 데이터 없는 패킷 (0x01 Request, 0x09 Request)
+  const isNoData =
+    (cmd === CMD.GET_GW_INFO && dir === DIR.REQUEST) ||
+    (cmd === CMD.GW_FACTORY_RESET && dir === DIR.REQUEST);
+  if (isNoData) return true;
+
+  // Length 검증
+  if (buf.length - offset < HEADER_SIZE) return false;
+  const length = buf.readUInt16BE(offset + 2);
+  return length <= MAX_PACKET_LENGTH;
+}
+
+/**
+ * 수신 버퍼에서 패킷 경계를 찾아 파싱 (스트림 누적 처리)
+ * 유효하지 않은 데이터가 있으면 1바이트씩 건너뛰며 유효한 헤더를 탐색 (resync)
+ */
+export function extractPackets(buf: Buffer): { packets: ProtocolPacket[]; remaining: Buffer; skipped: number } {
   const packets: ProtocolPacket[] = [];
   let offset = 0;
+  let skipped = 0;
 
   while (offset < buf.length) {
     const remaining = buf.subarray(offset);
     if (remaining.length < 2) break;
+
+    // 유효한 헤더가 아니면 1바이트씩 건너뛰며 resync
+    if (!isValidHeader(buf, offset)) {
+      offset += 1;
+      skipped += 1;
+      continue;
+    }
 
     const dataType = remaining.readUInt8(0);
     const direction = remaining.readUInt8(1);
@@ -142,7 +172,7 @@ export function extractPackets(buf: Buffer): { packets: ProtocolPacket[]; remain
     offset += totalSize;
   }
 
-  return { packets, remaining: Buffer.from(buf.subarray(offset)) };
+  return { packets, remaining: Buffer.from(buf.subarray(offset)), skipped };
 }
 
 // ============ 개별 파서 함수들 ============

@@ -63,5 +63,19 @@ export const HEADER_SIZE = 4;
 // DataType(1) + Direction(1) = 최소 패킷 (length 없는 경우, 예: 0x01 Request)
 export const MIN_PACKET_SIZE = 2;
 
+// 유효한 CMD 값 집합 (resync에 사용)
+export const VALID_CMDS = new Set([
+  CMD.GET_GW_INFO, CMD.SET_OTA_SERVER_URL, CMD.SET_OTA_FILE_NAME,
+  CMD.SET_WS_SERVER_URL, CMD.SET_REPORT_INTERVAL, CMD.SET_RSSI_FILTER,
+  CMD.CMD_OTA_START, CMD.GW_INFO_INDICATION, CMD.GW_FACTORY_RESET,
+  CMD.TAG_DATA_INDICATION, CMD.DOSE_DATA_INDICATION,
+]);
+
+// 유효한 Direction 값 집합
+export const VALID_DIRS = new Set([DIR.REQUEST, DIR.RESPONSE, DIR.INDICATION]);
+
+// Length 상한 (이 이상이면 파싱 오류로 판단)
+export const MAX_PACKET_LENGTH = 4096;
+
 export type CmdType = typeof CMD[keyof typeof CMD];
 export type DirType = typeof DIR[keyof typeof DIR];

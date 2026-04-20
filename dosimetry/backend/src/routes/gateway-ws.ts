@@ -62,7 +62,10 @@ export function createGatewaySocketHandler(app: FastifyInstance) {
         }
         const prevBuf = socketBuffers.get(socket) || Buffer.alloc(0);
         const combined = Buffer.concat([prevBuf, incoming]);
-        const { packets, remaining } = extractPackets(combined);
+        const { packets, remaining, skipped } = extractPackets(combined);
+        if (skipped > 0) {
+          app.log.warn(`패킷 resync: ${skipped} bytes 스킵됨`);
+        }
         socketBuffers.set(socket, remaining);
         for (const packet of packets) {
           await handlePacket(app, socket, packet);
