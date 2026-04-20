@@ -55,6 +55,21 @@ export interface TagBeaconData {
   raw: Buffer;              // 원본 31 bytes
 }
 
+// ============ 0x0B Indication: Dose Data Indication ============
+export interface DoseDataEntry {
+  advCount: number;         // 4 bytes, Big Endian
+  doseSensingVal: number;   // 4 bytes, Big Endian
+}
+
+export interface DoseDataIndication {
+  btMacAddr: string;        // 태그의 BLE MAC 6 bytes
+  rssi: number;             // 1 byte, signed
+  battery: number;          // 1 byte, %
+  temperature: number;      // 4 bytes, IEEE 754 float (Big Endian)
+  dataCount: number;        // 1 byte
+  doseData: DoseDataEntry[];
+}
+
 // ============ 공통 Response (0x02~0x07, 0x09) ============
 export interface SimpleResponse {
   returnValue: number;
@@ -254,6 +269,26 @@ function parseTagBeacon(buf: Buffer): TagBeaconData {
     doseAdc,
     raw: Buffer.from(buf),
   };
+}
+
+/** 0x0B Indication: Dose Data 파싱 */
+export function parseDoseDataIndication(data: Buffer): DoseDataIndication {
+  let offset = 0;
+
+  const btMacAddr = parseMac(data, offset); offset += 6;
+  const rssi = data.readInt8(offset); offset += 1;
+  const battery = data.readUInt8(offset); offset += 1;
+  const temperature = data.readFloatBE(offset); offset += 4;
+  const dataCount = data.readUInt8(offset); offset += 1;
+
+  const doseData: DoseDataEntry[] = [];
+  for (let i = 0; i < dataCount; i++) {
+    const advCount = data.readUInt32BE(offset); offset += 4;
+    const doseSensingVal = data.readUInt32BE(offset); offset += 4;
+    doseData.push({ advCount, doseSensingVal });
+  }
+
+  return { btMacAddr, rssi, battery, temperature, dataCount, doseData };
 }
 
 /** Simple Response 파싱 (0x02~0x07, 0x09 Response) */

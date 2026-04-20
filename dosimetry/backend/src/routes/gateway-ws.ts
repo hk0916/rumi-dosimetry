@@ -4,7 +4,7 @@
  *
  * 프로토콜 흐름:
  * - Gateway 접속 시 서버가 0x01 Request를 보내 Gateway 정보를 수집
- * - Gateway는 주기적으로 0x08 (GW Info Indication), 0x0A (Tag Data Indication)을 전송
+ * - Gateway는 주기적으로 0x08 (GW Info Indication), 0x0A (Tag Data Indication), 0x0B (Dose Data Indication)을 전송
  * - 서버는 REST API를 통해 0x02~0x07, 0x09 커맨드를 Gateway에 전송 가능
  */
 import { FastifyInstance } from "fastify";
@@ -16,10 +16,12 @@ import {
   parseGwInfoResponse,
   parseGwInfoIndication,
   parseTagDataIndication,
+  parseDoseDataIndication,
   parseSimpleResponse,
   buildGetGwInfoRequest,
   buildGwInfoIndicationResponse,
   buildTagDataResponse,
+  buildDoseDataResponse,
   buildSetOtaServerUrl,
   buildSetOtaFileName,
   buildSetWsServerUrl,
@@ -235,6 +237,12 @@ async function handlePacket(app: FastifyInstance, socket: any, packet: ProtocolP
       }
       break;
 
+    case CMD.DOSE_DATA_INDICATION:
+      if (packet.direction === DIR.INDICATION) {
+        await handleDoseDataIndication(app, socket, packet);
+      }
+      break;
+
     default:
       app.log.warn(`알 수 없는 커맨드: ${cmdHex}`);
   }
@@ -372,6 +380,79 @@ async function handleTagDataIndication(app: FastifyInstance, socket: any, packet
 
   // 0x0A Response (Success) 전송
   socket.send(buildTagDataResponse(RET.SUCCESS));
+}
+
+/** 0x0B Indication: Dose Data 수신 → DB 저장 + WebSocket 전파 + 응답 전송 */
+async function handleDoseDataIndication(app: FastifyInstance, socket: any, packet: ProtocolPacket) {
+  const dose = parseDoseDataIndication(packet.data);
+  app.log.info(`Dose Data: MAC=${dose.btMacAddr}, RSSI=${dose.rssi}, Battery=${dose.battery}%, Temp=${dose.temperature.toFixed(2)}°C, Count=${dose.dataCount}`);
+
+  const gwMac = socketToMac.get(socket);
+
+  const device = await prisma.device.findUnique({
+    where: { macAddress: dose.btMacAddr },
+  });
+
+  if (device) {
+    // 마지막 dose 데이터로 디바이스 상태 업데이트
+    const lastDose = dose.doseData[dose.doseData.length - 1];
+    const voltage = lastDose ? lastDose.doseSensingVal : undefined;
+    const advertisingCount = lastDose ? lastDose.advCount : undefined;
+
+    await prisma.device.update({
+      where: { id: device.id },
+      data: {
+        status: "online",
+        voltage,
+        rssi: dose.rssi,
+        battery: dose.battery,
+        temperature: Math.round(dose.temperature * 100),
+        advertisingCount,
+        uptime: new Date(),
+      },
+    });
+
+    // 각 dose 데이터를 SensorData로 저장
+    const now = new Date();
+    for (const entry of dose.doseData) {
+      const sensorData = await prisma.sensorData.create({
+        data: {
+          deviceId: device.id,
+          timestamp: now,
+          voltage: entry.doseSensingVal,
+          rssi: dose.rssi,
+          battery: dose.battery,
+          temperature: Math.round(dose.temperature * 100),
+          advertisingCount: entry.advCount,
+          gatewayMac: gwMac,
+        },
+      });
+
+      // 프론트엔드 WebSocket 클라이언트에 실시간 전파
+      const clients = wsClients.get(device.id);
+      if (clients) {
+        const msg = JSON.stringify({
+          deviceId: device.id,
+          voltage: entry.doseSensingVal,
+          rssi: dose.rssi,
+          battery: dose.battery,
+          temperature: dose.temperature,
+          advertisingCount: entry.advCount,
+          doseSensingVal: entry.doseSensingVal,
+          gatewayMac: gwMac,
+          timestamp: sensorData.timestamp,
+        });
+        for (const client of clients) {
+          try { client.send(msg); } catch { clients.delete(client); }
+        }
+      }
+    }
+  } else {
+    app.log.warn(`미등록 태그 디바이스: ${dose.btMacAddr}`);
+  }
+
+  // 0x0B Response (Success) 전송
+  socket.send(buildDoseDataResponse(RET.SUCCESS));
 }
 
 /** 일반 Response 처리 (0x02~0x07, 0x09) — 로그만 남김 */

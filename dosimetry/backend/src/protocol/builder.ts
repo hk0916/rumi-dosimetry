@@ -85,3 +85,10 @@ export function buildTagDataResponse(returnValue: number): Buffer {
   data.writeUInt8(returnValue, 0);
   return buildPacket(CMD.TAG_DATA_INDICATION, DIR.RESPONSE, data);
 }
+
+// ============ 0x0B: Dose Data Indication Response ============
+export function buildDoseDataResponse(returnValue: number): Buffer {
+  const data = Buffer.alloc(1);
+  data.writeUInt8(returnValue, 0);
+  return buildPacket(CMD.DOSE_DATA_INDICATION, DIR.RESPONSE, data);
+}

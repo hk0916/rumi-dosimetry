@@ -15,6 +15,7 @@ export const CMD = {
   GW_INFO_INDICATION:    0x08,
   GW_FACTORY_RESET:      0x09,
   TAG_DATA_INDICATION:   0x0A,
+  DOSE_DATA_INDICATION:  0x0B,
 } as const;
 
 // ============ Direction (Req/Rsp) ============
