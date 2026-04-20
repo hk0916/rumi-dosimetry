@@ -313,8 +313,8 @@ export function parseDoseDataIndication(data: Buffer): DoseDataIndication {
 
   const doseData: DoseDataEntry[] = [];
   for (let i = 0; i < dataCount; i++) {
-    const advCount = data.readUInt32BE(offset); offset += 4;
-    const doseSensingVal = data.readUInt32BE(offset); offset += 4;
+    const advCount = data.readUInt32LE(offset); offset += 4;
+    const doseSensingVal = data.readUInt32LE(offset); offset += 4;
     doseData.push({ advCount, doseSensingVal });
   }
 
