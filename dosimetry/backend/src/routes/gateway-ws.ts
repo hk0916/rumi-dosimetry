@@ -39,80 +39,67 @@ const socketBuffers = new Map<any, Buffer>();
 
 export { gatewayConnections };
 
-export async function gatewayWsRoutes(app: FastifyInstance) {
-  // ============ Gateway WebSocket 엔드포인트 ============
-  // Gateway가 ws://서버:포트/ws/gateway 로 접속
-  app.get(
-    "/gateway",
-    { websocket: true },
-    (socket, request) => {
-      app.log.info("Gateway WebSocket 연결됨");
-      socketBuffers.set(socket, Buffer.alloc(0));
+export function createGatewaySocketHandler(app: FastifyInstance) {
+  return (socket: any, request: any) => {
+    app.log.info("Gateway WebSocket 연결됨");
+    socketBuffers.set(socket, Buffer.alloc(0));
 
-      // 접속 즉시 Gateway 정보 요청 (0x01 Request)
-      const infoReq = buildGetGwInfoRequest();
-      socket.send(infoReq);
-      app.log.info(`-> 0x01 Get GW Info Request 전송`);
+    const infoReq = buildGetGwInfoRequest();
+    socket.send(infoReq);
+    app.log.info(`-> 0x01 Get GW Info Request 전송`);
 
-      // 바이너리 메시지 수신 처리
-      socket.on("message", async (rawData: Buffer | ArrayBuffer | Buffer[]) => {
-        try {
-          let incoming: Buffer;
-          if (Buffer.isBuffer(rawData)) {
-            incoming = rawData;
-          } else if (rawData instanceof ArrayBuffer) {
-            incoming = Buffer.from(rawData);
-          } else {
-            incoming = Buffer.concat(rawData);
-          }
-
-          // 기존 버퍼에 누적
-          const prevBuf = socketBuffers.get(socket) || Buffer.alloc(0);
-          const combined = Buffer.concat([prevBuf, incoming]);
-
-          // 패킷 추출
-          const { packets, remaining } = extractPackets(combined);
-          socketBuffers.set(socket, remaining);
-
-          for (const packet of packets) {
-            await handlePacket(app, socket, packet);
-          }
-        } catch (err) {
-          app.log.error(`패킷 처리 오류: ${err}`);
-        }
-      });
-
-      socket.on("close", () => {
-        const mac = socketToMac.get(socket);
-        if (mac) {
-          gatewayConnections.delete(mac);
-          socketToMac.delete(socket);
-          // Gateway 상태 offline 업데이트
-          prisma.gateway.updateMany({
-            where: { macAddress: mac },
-            data: { status: "offline" },
-          }).catch((err) => app.log.error(`Gateway offline 업데이트 실패: ${err}`));
-          app.log.info(`Gateway 연결 해제: ${mac}`);
-        }
-        socketBuffers.delete(socket);
-      });
-
-      socket.on("error", (err: Error) => {
-        app.log.error(`Gateway WS 오류: ${err.message}`);
-      });
-
-      // Ping/Pong heartbeat (30초)
-      const pingInterval = setInterval(() => {
-        if (socket.readyState === 1) {
-          socket.ping();
+    socket.on("message", async (rawData: Buffer | ArrayBuffer | Buffer[]) => {
+      try {
+        let incoming: Buffer;
+        if (Buffer.isBuffer(rawData)) {
+          incoming = rawData;
+        } else if (rawData instanceof ArrayBuffer) {
+          incoming = Buffer.from(rawData);
         } else {
-          clearInterval(pingInterval);
+          incoming = Buffer.concat(rawData);
         }
-      }, 30000);
-      socket.on("close", () => clearInterval(pingInterval));
-    }
-  );
+        const prevBuf = socketBuffers.get(socket) || Buffer.alloc(0);
+        const combined = Buffer.concat([prevBuf, incoming]);
+        const { packets, remaining } = extractPackets(combined);
+        socketBuffers.set(socket, remaining);
+        for (const packet of packets) {
+          await handlePacket(app, socket, packet);
+        }
+      } catch (err) {
+        app.log.error(`패킷 처리 오류: ${err}`);
+      }
+    });
 
+    socket.on("close", () => {
+      const mac = socketToMac.get(socket);
+      if (mac) {
+        gatewayConnections.delete(mac);
+        socketToMac.delete(socket);
+        prisma.gateway.updateMany({
+          where: { macAddress: mac },
+          data: { status: "offline" },
+        }).catch((err) => app.log.error(`Gateway offline 업데이트 실패: ${err}`));
+        app.log.info(`Gateway 연결 해제: ${mac}`);
+      }
+      socketBuffers.delete(socket);
+    });
+
+    socket.on("error", (err: Error) => {
+      app.log.error(`Gateway WS 오류: ${err.message}`);
+    });
+
+    const pingInterval = setInterval(() => {
+      if (socket.readyState === 1) {
+        socket.ping();
+      } else {
+        clearInterval(pingInterval);
+      }
+    }, 30000);
+    socket.on("close", () => clearInterval(pingInterval));
+  };
+}
+
+export async function gatewayWsRoutes(app: FastifyInstance) {
   // ============ REST API: Gateway에 커맨드 전송 ============
   app.addHook("onRequest", (app as any).authenticate);
 

@@ -13,7 +13,7 @@ import { mockRoutes } from "./routes/mock.js";
 import { calibrationRoutes } from "./routes/calibrations.js";
 import { analysisRoutes } from "./routes/analysis.js";
 import { otaRoutes } from "./routes/ota.js";
-import { gatewayWsRoutes } from "./routes/gateway-ws.js";
+import { gatewayWsRoutes, createGatewaySocketHandler } from "./routes/gateway-ws.js";
 import { authMiddleware } from "./middleware/auth.js";
 
 export const prisma = new PrismaClient();
@@ -28,6 +28,9 @@ async function start() {
   // Decorate
   app.decorate("prisma", prisma);
   app.decorate("authenticate", authMiddleware(app));
+
+  // Gateway WebSocket at root "/" (인증 없음 — 펌웨어용)
+  app.get("/", { websocket: true }, createGatewaySocketHandler(app));
 
   // Routes
   await app.register(authRoutes, { prefix: "/api/auth" });
