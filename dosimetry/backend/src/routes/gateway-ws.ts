@@ -21,7 +21,6 @@ import {
   buildGetGwInfoRequest,
   buildGwInfoIndicationResponse,
   buildTagDataResponse,
-  buildDoseDataResponse,
   buildSetOtaServerUrl,
   buildSetOtaFileName,
   buildSetWsServerUrl,
@@ -416,12 +415,14 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
     });
 
     // 각 dose 데이터를 SensorData로 저장
-    const now = new Date();
-    for (const entry of dose.doseData) {
+    // 한 패킷 내 entry별로 1ms씩 차이를 둬서 timestamp 중복 방지
+    const nowMs = Date.now();
+    for (let i = 0; i < dose.doseData.length; i++) {
+      const entry = dose.doseData[i];
       const sensorData = await prisma.sensorData.create({
         data: {
           deviceId: device.id,
-          timestamp: now,
+          timestamp: new Date(nowMs + i),
           voltage: entry.doseSensingVal,
           rssi: dose.rssi,
           battery: dose.battery,
@@ -453,9 +454,7 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
   } else {
     app.log.warn(`미등록 태그 디바이스: ${dose.btMacAddr}`);
   }
-
-  // 0x0B Response (Success) 전송
-  socket.send(buildDoseDataResponse(RET.SUCCESS));
+  // 0x0B는 Gateway에 Ack 응답을 보내지 않음
 }
 
 /** 일반 Response 처리 (0x02~0x07, 0x09) — 로그만 남김 */

@@ -14,6 +14,9 @@ import dayjs from "dayjs";
 
 const { RangePicker } = DatePicker;
 
+// 실시간 차트 슬라이딩 윈도우: 최근 N ms만 유지
+const LIVE_WINDOW_MS = 2 * 60 * 1000;
+
 interface DataPoint {
   time: string;
   voltage: number;
@@ -48,6 +51,19 @@ export default function MonitoringPage() {
     return () => { wsRef.current?.close(); };
   }, []);
 
+  // 실시간 모니터링 중에는 주기적으로 윈도우 밖 데이터 제거
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => {
+      const cutoff = Date.now() - LIVE_WINDOW_MS;
+      setLiveData((prev) => {
+        const filtered = prev.filter((d) => new Date(d.timestamp).getTime() >= cutoff);
+        return filtered.length === prev.length ? prev : filtered;
+      });
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [running]);
+
   // Update live stats when liveData changes
   useEffect(() => {
     if (liveData.length === 0) {
@@ -81,7 +97,8 @@ export default function MonitoringPage() {
             voltage: Number(msg.voltage),
             timestamp: msg.timestamp,
           }];
-          return next.length > 500 ? next.slice(-500) : next;
+          const cutoff = Date.now() - LIVE_WINDOW_MS;
+          return next.filter((d) => new Date(d.timestamp).getTime() >= cutoff);
         });
       } catch {
         // 잘못된 메시지 무시
@@ -193,6 +210,14 @@ export default function MonitoringPage() {
       { type: "inside", start: 0, end: 100 },
       { type: "slider", start: 0, end: 100, height: 20, bottom: 5 },
     ],
+    toolbox: {
+      right: 20,
+      feature: {
+        dataZoom: { yAxisIndex: "none", title: { zoom: "Zoom", back: "Zoom Out" } },
+        restore: { title: "Restore" },
+        saveAsImage: { title: "Save" },
+      },
+    },
   };
 
   // History chart option
