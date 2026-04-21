@@ -61,6 +61,32 @@ export async function gatewayRoutes(app: FastifyInstance) {
     }
   });
 
+  // PUT /api/gateways/:id — 기본 정보 수정 (이름 등)
+  app.put("/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as any;
+    try {
+      const data: any = {};
+      if (body.deviceName !== undefined) data.deviceName = body.deviceName;
+      if (body.deviceType !== undefined) data.deviceType = body.deviceType;
+      if (body.macAddress !== undefined) data.macAddress = body.macAddress;
+
+      const gateway = await prisma.gateway.update({
+        where: { id: Number(id) },
+        data,
+      });
+      return gateway;
+    } catch (err: any) {
+      if (err.code === "P2025") {
+        return reply.status(404).send({ error: "Gateway not found" });
+      }
+      if (err.code === "P2002") {
+        return reply.status(409).send({ error: "이미 등록된 MAC 주소입니다." });
+      }
+      throw err;
+    }
+  });
+
   // PUT /api/gateways/:id/settings
   app.put("/:id/settings", async (request, reply) => {
     const { id } = request.params as { id: string };

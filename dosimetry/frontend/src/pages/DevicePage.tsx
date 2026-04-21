@@ -3,13 +3,23 @@ import {
   Tabs, Table, Button, Tag, Modal, Descriptions, message, Popconfirm,
   Form, Input, Select, Switch, InputNumber, Upload, Divider,
 } from "antd";
-import { PlusOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, UploadOutlined, EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import api from "../services/api";
 import dayjs from "dayjs";
 
+function useIsAdmin() {
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    return user.role === "admin" || user.role === "super_admin";
+  } catch {
+    return false;
+  }
+}
+
 export default function DevicePage() {
   const { t } = useTranslation();
+  const isAdmin = useIsAdmin();
   const [dosimeters, setDosimeters] = useState<any[]>([]);
   const [gateways, setGateways] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -19,6 +29,10 @@ export default function DevicePage() {
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const [addGatewayOpen, setAddGatewayOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // 인라인 이름 편집 상태
+  const [editingName, setEditingName] = useState<"device" | "gateway" | null>(null);
+  const [draftName, setDraftName] = useState("");
 
   const [deviceForm] = Form.useForm();
   const [gatewayForm] = Form.useForm();
@@ -121,6 +135,91 @@ export default function DevicePage() {
     }
   };
 
+  const startEditName = (kind: "device" | "gateway") => {
+    const current = kind === "device" ? selectedDevice?.deviceName : selectedGateway?.deviceName;
+    setDraftName(current || "");
+    setEditingName(kind);
+  };
+
+  const cancelEditName = () => {
+    setEditingName(null);
+    setDraftName("");
+  };
+
+  const saveDeviceName = async () => {
+    if (!selectedDevice || !draftName.trim()) return;
+    setSaving(true);
+    try {
+      const { data } = await api.put(`/devices/${selectedDevice.id}`, { deviceName: draftName.trim() });
+      message.success(t("common.success"));
+      setSelectedDevice(data);
+      setEditingName(null);
+      fetchDosimeters();
+    } catch (err: any) {
+      message.error(err.response?.data?.error || t("common.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveGatewayName = async () => {
+    if (!selectedGateway || !draftName.trim()) return;
+    setSaving(true);
+    try {
+      const { data } = await api.put(`/gateways/${selectedGateway.id}`, { deviceName: draftName.trim() });
+      message.success(t("common.success"));
+      setSelectedGateway(data);
+      setEditingName(null);
+      fetchGateways();
+    } catch (err: any) {
+      message.error(err.response?.data?.error || t("common.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderEditableName = (
+    kind: "device" | "gateway",
+    current: string,
+    onSave: () => void
+  ) => {
+    if (editingName === kind) {
+      return (
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <Input
+            size="small"
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onPressEnter={onSave}
+            autoFocus
+            style={{ flex: 1 }}
+          />
+          <Button
+            type="primary"
+            size="small"
+            icon={<CheckOutlined />}
+            loading={saving}
+            onClick={onSave}
+          />
+          <Button size="small" icon={<CloseOutlined />} onClick={cancelEditName} />
+        </div>
+      );
+    }
+    return (
+      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span>{current}</span>
+        {isAdmin && (
+          <Button
+            type="text"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => startEditName(kind)}
+          />
+        )}
+      </span>
+    );
+  };
+
   const handleSaveSettings = async (values: any) => {
     if (!selectedGateway) return;
     setSaving(true);
@@ -214,18 +313,20 @@ export default function DevicePage() {
       <Modal
         title={selectedDevice?.deviceName}
         open={!!selectedDevice}
-        onCancel={() => setSelectedDevice(null)}
+        onCancel={() => { setSelectedDevice(null); cancelEditName(); }}
         footer={[
-          <Popconfirm key="del" title={t("common.confirm_delete")} onConfirm={() => { handleDeleteDevice(selectedDevice.id); setSelectedDevice(null); }}>
+          <Popconfirm key="del" title={t("common.confirm_delete")} onConfirm={() => { handleDeleteDevice(selectedDevice.id); setSelectedDevice(null); cancelEditName(); }}>
             <Button danger>Delete</Button>
           </Popconfirm>,
-          <Button key="close" onClick={() => setSelectedDevice(null)}>Close</Button>,
+          <Button key="close" onClick={() => { setSelectedDevice(null); cancelEditName(); }}>Close</Button>,
         ]}
         width={520}
       >
         {selectedDevice && (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="Device Name">{selectedDevice.deviceName}</Descriptions.Item>
+            <Descriptions.Item label="Device Name">
+              {renderEditableName("device", selectedDevice.deviceName, saveDeviceName)}
+            </Descriptions.Item>
             <Descriptions.Item label="MAC Address">{selectedDevice.macAddress}</Descriptions.Item>
             <Descriptions.Item label="Device Type">{selectedDevice.deviceType}</Descriptions.Item>
             <Descriptions.Item label="Status"><Tag color={selectedDevice.status === "online" ? "green" : "default"}>{selectedDevice.status}</Tag></Descriptions.Item>
@@ -241,7 +342,7 @@ export default function DevicePage() {
       <Modal
         title={selectedGateway?.deviceName}
         open={!!selectedGateway}
-        onCancel={() => setSelectedGateway(null)}
+        onCancel={() => { setSelectedGateway(null); cancelEditName(); }}
         footer={null}
         width={680}
         destroyOnClose
@@ -254,7 +355,9 @@ export default function DevicePage() {
               children: (
                 <>
                   <Descriptions column={1} bordered size="small">
-                    <Descriptions.Item label="Device Name">{selectedGateway.deviceName}</Descriptions.Item>
+                    <Descriptions.Item label="Device Name">
+                      {renderEditableName("gateway", selectedGateway.deviceName, saveGatewayName)}
+                    </Descriptions.Item>
                     <Descriptions.Item label="MAC Address">{selectedGateway.macAddress}</Descriptions.Item>
                     <Descriptions.Item label="Device Type">{selectedGateway.deviceType}</Descriptions.Item>
                     <Descriptions.Item label="Status"><Tag color={selectedGateway.status === "online" ? "green" : "default"}>{selectedGateway.status}</Tag></Descriptions.Item>
@@ -273,7 +376,7 @@ export default function DevicePage() {
                     <Descriptions.Item label="BLE Firmware">{selectedGateway.bleFwVersion || "-"}</Descriptions.Item>
                   </Descriptions>
                   <div style={{ marginTop: 16, textAlign: "right" }}>
-                    <Popconfirm title={t("common.confirm_delete")} onConfirm={() => { handleDeleteGateway(selectedGateway.id); setSelectedGateway(null); }}>
+                    <Popconfirm title={t("common.confirm_delete")} onConfirm={() => { handleDeleteGateway(selectedGateway.id); setSelectedGateway(null); cancelEditName(); }}>
                       <Button danger>Delete</Button>
                     </Popconfirm>
                   </div>
