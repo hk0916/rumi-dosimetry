@@ -373,8 +373,8 @@ export default function CalibrationPage() {
         )}
       </Card>
 
-      {/* 계산 영역 */}
-      {chartData.length > 0 && (
+      {/* 계산 영역 (Footer) — 항상 표시 */}
+      {(
         <Card size="small" title="Dose Calculation">
           <Row gutter={[24, 16]} align="middle">
             {/* 범위 지정 */}

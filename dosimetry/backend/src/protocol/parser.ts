@@ -177,10 +177,10 @@ export function extractPackets(buf: Buffer): { packets: ProtocolPacket[]; remain
 
 // ============ 개별 파서 함수들 ============
 
-/** MAC 주소 6바이트를 문자열로 변환 */
+/** MAC 주소 6바이트를 문자열로 변환 (Little Endian: LSB 우선 전송) */
 function parseMac(buf: Buffer, offset: number): string {
   const bytes: string[] = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 5; i >= 0; i--) {
     bytes.push(buf.readUInt8(offset + i).toString(16).padStart(2, "0").toUpperCase());
   }
   return bytes.join(":");

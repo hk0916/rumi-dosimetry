@@ -317,6 +317,9 @@ export default function MonitoringPage() {
               api.get("/devices").then(({ data }) => setDevices(data.data));
               api.get("/gateways").then(({ data }) => setGateways(data.data));
             }} />
+            <Button icon={<DownloadOutlined />} onClick={handleExportCSV} disabled={liveData.length === 0 && historyData.length === 0}>
+              CSV Export
+            </Button>
           </Space>
 
         </div>
