@@ -91,7 +91,7 @@ export default function ManageCalibrationPage() {
       title: "Baseline",
       dataIndex: "baseline",
       width: 90,
-      render: (v: number) => v != null ? `${v} mV` : "-",
+      render: (v: number) => v != null ? `${Number(v).toFixed(6)} V` : "-",
     },
     {
       title: "Cumulative Dose",
@@ -108,7 +108,7 @@ export default function ManageCalibrationPage() {
       dataIndex: "cfFactor",
       render: (v: string) => (
         <span style={{ fontWeight: 700, color: "#70AD47" }}>
-          {v != null ? `${Number(v).toFixed(2)} mV·s/cGy` : "-"}
+          {v != null ? `${Number(v).toFixed(6)} V·s/cGy` : "-"}
         </span>
       ),
     },
@@ -175,7 +175,7 @@ export default function ManageCalibrationPage() {
               <Descriptions.Item label="Date">{selected.date ? dayjs(selected.date).format("YYYY-MM-DD") : "-"}</Descriptions.Item>
               <Descriptions.Item label="Filter Type"><Tag>{selected.filterType || "-"}</Tag></Descriptions.Item>
               <Descriptions.Item label="Window Size">{selected.windowSize ?? "-"}</Descriptions.Item>
-              <Descriptions.Item label="Baseline">{selected.baseline != null ? `${selected.baseline} mV` : "-"}</Descriptions.Item>
+              <Descriptions.Item label="Baseline">{selected.baseline != null ? `${Number(selected.baseline).toFixed(6)} V` : "-"}</Descriptions.Item>
               <Descriptions.Item label="Time Range">
                 {selected.startTime && selected.endTime
                   ? `${dayjs(selected.startTime).format("HH:mm:ss")} ~ ${dayjs(selected.endTime).format("HH:mm:ss")}`
@@ -191,7 +191,7 @@ export default function ManageCalibrationPage() {
               </Descriptions.Item>
               <Descriptions.Item label="CF Factor">
                 <span style={{ fontSize: 16, color: "#70AD47", fontWeight: 700 }}>
-                  {selected.cfFactor != null ? `${Number(selected.cfFactor).toFixed(2)} mV·s/cGy` : "-"}
+                  {selected.cfFactor != null ? `${Number(selected.cfFactor).toFixed(6)} V·s/cGy` : "-"}
                 </span>
               </Descriptions.Item>
             </Descriptions>

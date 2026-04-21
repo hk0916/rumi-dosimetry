@@ -175,7 +175,7 @@ export function applyFilter(
  * 누적선량 계산: ∫(start→end) [smoothed_voltage - baseline] dt
  * timestamps: ms 단위의 Date 배열
  * voltages: smoothed voltage 배열
- * baseline: 기준 전압 (mV)
+ * baseline: 기준 전압 (V)
  * 반환: V·s 단위의 누적선량
  */
 export function calculateCumulativeDose(

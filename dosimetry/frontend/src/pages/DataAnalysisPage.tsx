@@ -195,7 +195,7 @@ export default function DataAnalysisPage() {
       data: chartData.map((d: any) => dayjs(d.timestamp).format("HH:mm:ss")),
       axisLabel: { fontSize: 10, rotate: 30 },
     },
-    yAxis: { type: "value", name: "Voltage (mV)", axisLabel: { fontSize: 10 } },
+    yAxis: { type: "value", name: "Voltage (V)", axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) } },
     series: [
       { name: "Original", type: "line", data: chartData.map((d: any) => d.original), showSymbol: false, lineStyle: { color: "#4472C4", width: 1 } },
       { name: "Baseline", type: "line", data: chartData.map(() => baseline), showSymbol: false, lineStyle: { color: "#FFC000", width: 1.5, type: "dashed" } },

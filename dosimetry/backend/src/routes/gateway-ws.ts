@@ -322,8 +322,8 @@ async function handleTagDataIndication(app: FastifyInstance, socket: any, packet
   });
 
   if (device) {
-    // ADC 값을 voltage로 변환 (4 bytes raw ADC)
-    const voltage = tag.beacon.doseAdc;
+    // ADC raw → Voltage (V): raw * 1.21 / 0xFFFFF
+    const voltage = (tag.beacon.doseAdc * 1.21) / 0xFFFFF;
 
     // 디바이스 상태 업데이트
     await prisma.device.update({
@@ -396,9 +396,12 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
   });
 
   if (device) {
+    // ADC raw → Voltage (V): raw * 1.21 / 0xFFFFF
+    const toVolt = (raw: number) => (raw * 1.21) / 0xFFFFF;
+
     // 마지막 dose 데이터로 디바이스 상태 업데이트
     const lastDose = dose.doseData[dose.doseData.length - 1];
-    const voltage = lastDose ? lastDose.doseSensingVal : undefined;
+    const voltage = lastDose ? toVolt(lastDose.doseSensingVal) : undefined;
     const advertisingCount = lastDose ? lastDose.advCount : undefined;
 
     await prisma.device.update({
@@ -414,16 +417,18 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
       },
     });
 
-    // 각 dose 데이터를 SensorData로 저장
-    // 한 패킷 내 entry별로 1ms씩 차이를 둬서 timestamp 중복 방지
-    const nowMs = Date.now();
-    for (let i = 0; i < dose.doseData.length; i++) {
+    // 각 dose entry는 25ms 간격으로 센싱됨 → 마지막 entry를 기준으로 역산
+    const n = dose.doseData.length;
+    const lastMs = Date.now();
+    for (let i = 0; i < n; i++) {
       const entry = dose.doseData[i];
+      const v = toVolt(entry.doseSensingVal);
+      const entryMs = lastMs - (n - 1 - i) * 25;
       const sensorData = await prisma.sensorData.create({
         data: {
           deviceId: device.id,
-          timestamp: new Date(nowMs + i),
-          voltage: entry.doseSensingVal,
+          timestamp: new Date(entryMs),
+          voltage: v,
           rssi: dose.rssi,
           battery: dose.battery,
           temperature: Math.round(dose.temperature * 100),
@@ -437,7 +442,7 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
       if (clients) {
         const msg = JSON.stringify({
           deviceId: device.id,
-          voltage: entry.doseSensingVal,
+          voltage: v,
           rssi: dose.rssi,
           battery: dose.battery,
           temperature: dose.temperature,

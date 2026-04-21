@@ -163,7 +163,7 @@ export default function MonitoringPage() {
 
     const deviceName = devices.find((d) => d.id === selectedDeviceId)?.deviceName || "unknown";
     const csv = [
-      "ID,Timestamp,Voltage(mV)",
+      "ID,Timestamp,Voltage(V)",
       ...dataToExport.map((d) =>
         `${d.id},${dayjs(d.timestamp).format("YYYY-MM-DD HH:mm:ss.SSS")},${d.voltage}`
       ),
@@ -191,8 +191,8 @@ export default function MonitoringPage() {
     },
     yAxis: {
       type: "value",
-      name: "Voltage (mV)",
-      axisLabel: { fontSize: 10 },
+      name: "Voltage (V)",
+      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) },
     },
     series: [{
       type: "line",
@@ -204,7 +204,7 @@ export default function MonitoringPage() {
     }],
     tooltip: { trigger: "axis", formatter: (params: any) => {
       const p = params[0];
-      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value).toFixed(2)} mV</b>`;
+      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value).toFixed(6)} V</b>`;
     }},
     dataZoom: [
       { type: "inside", start: 0, end: 100 },
@@ -232,8 +232,8 @@ export default function MonitoringPage() {
     },
     yAxis: {
       type: "value",
-      name: "Voltage (mV)",
-      axisLabel: { fontSize: 10 },
+      name: "Voltage (V)",
+      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) },
     },
     series: [{
       type: "line",
@@ -246,7 +246,7 @@ export default function MonitoringPage() {
     }],
     tooltip: { trigger: "axis", formatter: (params: any) => {
       const p = params[0];
-      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value).toFixed(4)} mV</b>`;
+      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value).toFixed(6)} V</b>`;
     }},
     dataZoom: [
       { type: "inside", start: 0, end: 100 },
@@ -277,9 +277,9 @@ export default function MonitoringPage() {
       render: (v: string) => dayjs(v).format("YYYY-MM-DD HH:mm:ss.SSS"),
     },
     {
-      title: "Voltage (mV)",
+      title: "Voltage (V)",
       dataIndex: "voltage",
-      render: (v: number) => Number(v).toFixed(4),
+      render: (v: number) => Number(v).toFixed(6),
       sorter: (a: SensorRecord, b: SensorRecord) => a.voltage - b.voltage,
     },
   ];
@@ -335,10 +335,10 @@ export default function MonitoringPage() {
                   <Card size="small" style={{ marginBottom: 12 }}>
                     <Row gutter={16}>
                       <Col span={4}><Statistic title="Data Points" value={liveStats.count} /></Col>
-                      <Col span={5}><Statistic title="Latest (mV)" value={liveStats.latest} precision={2} valueStyle={{ color: "#4472C4" }} /></Col>
-                      <Col span={5}><Statistic title="Min (mV)" value={liveStats.min} precision={2} valueStyle={{ color: "#70AD47" }} /></Col>
-                      <Col span={5}><Statistic title="Max (mV)" value={liveStats.max} precision={2} valueStyle={{ color: "#C0504D" }} /></Col>
-                      <Col span={5}><Statistic title="Avg (mV)" value={liveStats.avg} precision={2} /></Col>
+                      <Col span={5}><Statistic title="Latest (V)" value={liveStats.latest} precision={6} valueStyle={{ color: "#4472C4" }} /></Col>
+                      <Col span={5}><Statistic title="Min (V)" value={liveStats.min} precision={6} valueStyle={{ color: "#70AD47" }} /></Col>
+                      <Col span={5}><Statistic title="Max (V)" value={liveStats.max} precision={6} valueStyle={{ color: "#C0504D" }} /></Col>
+                      <Col span={5}><Statistic title="Avg (V)" value={liveStats.avg} precision={6} /></Col>
                     </Row>
                   </Card>
                 )}

@@ -205,8 +205,8 @@ export default function CalibrationPage() {
     },
     yAxis: {
       type: "value",
-      name: "Voltage (mV)",
-      axisLabel: { fontSize: 10 },
+      name: "Voltage (V)",
+      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) },
     },
     series: [
       {
@@ -241,7 +241,7 @@ export default function CalibrationPage() {
         let html = `<b>${time}</b><br/>`;
         for (const p of params) {
           if (p.seriesName !== "Baseline") {
-            html += `${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(2)} mV<br/>`;
+            html += `${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(6)} V<br/>`;
           }
         }
         return html;
@@ -341,7 +341,7 @@ export default function CalibrationPage() {
                 value={baseline}
                 onChange={(v) => v != null && setBaseline(v)}
                 style={{ width: 100 }}
-                addonAfter="mV"
+                addonAfter="V"
               />
             </Space>
           </Col>
@@ -421,7 +421,7 @@ export default function CalibrationPage() {
               >
                 <Descriptions.Item label="Cumulative Dose">
                   <span style={{ fontSize: 16, color: "#4472C4", fontWeight: 700 }}>
-                    {cumulativeDose != null ? cumulativeDose.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-"}
+                    {cumulativeDose != null ? cumulativeDose.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "-"}
                   </span>
                   <span style={{ marginLeft: 4, color: "#888" }}>V·s</span>
                 </Descriptions.Item>
@@ -441,9 +441,9 @@ export default function CalibrationPage() {
                 </Descriptions.Item>
                 <Descriptions.Item label="CF Factor">
                   <span style={{ fontSize: 18, color: cfFactor != null ? "#70AD47" : "#ccc", fontWeight: 700 }}>
-                    {cfFactor != null ? cfFactor.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-"}
+                    {cfFactor != null ? cfFactor.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "-"}
                   </span>
-                  <span style={{ marginLeft: 4, color: "#888" }}>mV·s/cGy</span>
+                  <span style={{ marginLeft: 4, color: "#888" }}>V·s/cGy</span>
                 </Descriptions.Item>
               </Descriptions>
             </Col>
