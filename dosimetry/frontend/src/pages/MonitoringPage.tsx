@@ -360,25 +360,32 @@ export default function MonitoringPage() {
             label: "Real-time Monitoring",
             children: (
               <>
-                {/* Live Stats */}
+                {/* Live Stats — compact one-liner */}
                 {liveData.length > 0 && (
-                  <Card size="small" style={{ marginBottom: 12 }}>
+                  <Card size="small" style={{ marginBottom: 12 }} styles={{ body: { padding: "10px 16px" } }}>
                     <Row gutter={16}>
-                      <Col span={4}><Statistic title="Data Points (누적)" value={liveStats.count} /></Col>
-                      <Col span={5}><Statistic title="Latest (mV)" value={liveStats.latest * 1000} precision={6} valueStyle={{ color: "#4472C4" }} /></Col>
-                      <Col span={5}><Statistic title="Min (mV)" value={liveStats.min * 1000} precision={6} valueStyle={{ color: "#70AD47" }} /></Col>
-                      <Col span={5}><Statistic title="Max (mV)" value={liveStats.max * 1000} precision={6} valueStyle={{ color: "#C0504D" }} /></Col>
-                      <Col span={5}><Statistic title="Avg (mV)" value={liveStats.avg * 1000} precision={6} /></Col>
+                      <Col span={4}><Statistic title="Data Points (누적)" value={liveStats.count} valueStyle={{ fontSize: 18 }} /></Col>
+                      <Col span={5}><Statistic title="Latest (mV)" value={liveStats.latest * 1000} precision={6} valueStyle={{ color: "#4472C4", fontSize: 18 }} /></Col>
+                      <Col span={5}><Statistic title="Min (mV)" value={liveStats.min * 1000} precision={6} valueStyle={{ color: "#70AD47", fontSize: 18 }} /></Col>
+                      <Col span={5}><Statistic title="Max (mV)" value={liveStats.max * 1000} precision={6} valueStyle={{ color: "#C0504D", fontSize: 18 }} /></Col>
+                      <Col span={5}><Statistic title="Avg (mV)" value={liveStats.avg * 1000} precision={6} valueStyle={{ fontSize: 18 }} /></Col>
                     </Row>
                   </Card>
                 )}
 
-                {/* Live Chart */}
-                <Card size="small">
+                {/* Live Chart — fills remaining vertical space for better visual balance */}
+                <Card size="small" styles={{ body: { padding: 12 } }}>
                   {liveData.length > 0 ? (
-                    <ReactECharts option={liveChartOption} style={{ height: 380 }} />
+                    <ReactECharts
+                      option={liveChartOption}
+                      style={{ height: "calc(100vh - 310px)", minHeight: 420 }}
+                    />
                   ) : (
-                    <div style={{ height: 380, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb" }}>
+                    <div style={{
+                      height: "calc(100vh - 310px)", minHeight: 420,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "#bbb", fontSize: 15,
+                    }}>
                       {running
                         ? "데이터 수신 대기 중..."
                         : "디바이스를 선택하고 Start 버튼을 누르세요."}
@@ -420,8 +427,11 @@ export default function MonitoringPage() {
 
                 {/* History Chart */}
                 {historyData.length > 0 && (
-                  <Card size="small" style={{ marginBottom: 12 }}>
-                    <ReactECharts option={historyChartOption} style={{ height: 350 }} />
+                  <Card size="small" style={{ marginBottom: 12 }} styles={{ body: { padding: 12 } }}>
+                    <ReactECharts
+                      option={historyChartOption}
+                      style={{ height: "calc(45vh - 60px)", minHeight: 320 }}
+                    />
                   </Card>
                 )}
 
@@ -440,7 +450,7 @@ export default function MonitoringPage() {
                       showTotal: (t) => `Total: ${t}건`,
                       onChange: (page, size) => { setHistoryPage(page); setHistoryPageSize(size); },
                     }}
-                    scroll={{ y: 400 }}
+                    scroll={{ y: historyData.length > 0 ? "calc(40vh - 80px)" : 400 }}
                   />
                 </Card>
               </>
