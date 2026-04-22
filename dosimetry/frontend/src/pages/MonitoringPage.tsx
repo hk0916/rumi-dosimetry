@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   Select, Button, Card, Space, Tag, message,
   DatePicker, Table, Statistic, Row, Col, Tabs,
@@ -34,8 +34,24 @@ export default function MonitoringPage() {
   const [gateways, setGateways] = useState<any[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
-  const [liveData, setLiveData] = useState<DataPoint[]>([]);
+  // allData: 세션 시작 후 받은 전체 누적 버퍼 (Data Points 카운트/CSV export 용)
+  const [allData, setAllData] = useState<DataPoint[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // liveData: 차트 렌더 성능을 위한 최근 2분 슬라이딩 윈도우 뷰
+  const liveData = useMemo(() => {
+    if (allData.length === 0) return [] as DataPoint[];
+    const cutoff = Date.now() - LIVE_WINDOW_MS;
+    // 뒤에서부터 훑어 cutoff 이상인 최초 인덱스를 찾으면 slice
+    let start = 0;
+    for (let i = allData.length - 1; i >= 0; i--) {
+      if (new Date(allData[i].timestamp).getTime() < cutoff) {
+        start = i + 1;
+        break;
+      }
+    }
+    return start === 0 ? allData : allData.slice(start);
+  }, [allData]);
 
   // Historical data
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
@@ -51,39 +67,31 @@ export default function MonitoringPage() {
     return () => { wsRef.current?.close(); };
   }, []);
 
-  // 실시간 모니터링 중에는 주기적으로 윈도우 밖 데이터 제거
+  // Update live stats when allData changes (세션 누적 기준 - 감소하지 않음)
   useEffect(() => {
-    if (!running) return;
-    const timer = setInterval(() => {
-      const cutoff = Date.now() - LIVE_WINDOW_MS;
-      setLiveData((prev) => {
-        const filtered = prev.filter((d) => new Date(d.timestamp).getTime() >= cutoff);
-        return filtered.length === prev.length ? prev : filtered;
-      });
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [running]);
-
-  // Update live stats when liveData changes
-  useEffect(() => {
-    if (liveData.length === 0) {
+    if (allData.length === 0) {
       setLiveStats({ count: 0, min: 0, max: 0, avg: 0, latest: 0 });
       return;
     }
-    const voltages = liveData.map((d) => d.voltage);
+    let min = Infinity, max = -Infinity, sum = 0;
+    for (const d of allData) {
+      if (d.voltage < min) min = d.voltage;
+      if (d.voltage > max) max = d.voltage;
+      sum += d.voltage;
+    }
     setLiveStats({
-      count: voltages.length,
-      min: Math.min(...voltages),
-      max: Math.max(...voltages),
-      avg: voltages.reduce((a, b) => a + b, 0) / voltages.length,
-      latest: voltages[voltages.length - 1],
+      count: allData.length,
+      min,
+      max,
+      avg: sum / allData.length,
+      latest: allData[allData.length - 1].voltage,
     });
-  }, [liveData]);
+  }, [allData]);
 
   const handleStart = () => {
     if (!selectedDeviceId) return;
     setRunning(true);
-    setLiveData([]);
+    setAllData([]);
 
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${protocol}://${window.location.host}/ws/monitoring/${selectedDeviceId}`);
@@ -91,15 +99,12 @@ export default function MonitoringPage() {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        setLiveData((prev) => {
-          const next = [...prev, {
-            time: new Date(msg.timestamp).toLocaleTimeString("ko-KR", { hour12: false }),
-            voltage: Number(msg.voltage),
-            timestamp: msg.timestamp,
-          }];
-          const cutoff = Date.now() - LIVE_WINDOW_MS;
-          return next.filter((d) => new Date(d.timestamp).getTime() >= cutoff);
-        });
+        // 누적 버퍼에 append — 윈도우 자르기 없이 세션 전체 보관
+        setAllData((prev) => [...prev, {
+          time: new Date(msg.timestamp).toLocaleTimeString("ko-KR", { hour12: false }),
+          voltage: Number(msg.voltage),
+          timestamp: msg.timestamp,
+        }]);
       } catch {
         // 잘못된 메시지 무시
       }
@@ -148,9 +153,9 @@ export default function MonitoringPage() {
     }
   };
 
-  // CSV Export
+  // CSV Export — 실시간 탭에서는 윈도우 무관 전체 누적(allData) 사용
   const handleExportCSV = useCallback(() => {
-    const dataToExport = historyData.length > 0 ? historyData : liveData.map((d, i) => ({
+    const dataToExport = historyData.length > 0 ? historyData : allData.map((d, i) => ({
       id: String(i + 1),
       voltage: d.voltage,
       timestamp: d.timestamp,
@@ -179,13 +184,13 @@ export default function MonitoringPage() {
     a.click();
     URL.revokeObjectURL(url);
     message.success("CSV 파일이 다운로드되었습니다.");
-  }, [historyData, liveData, selectedDeviceId, devices]);
+  }, [historyData, allData, selectedDeviceId, devices]);
 
   // Live chart option
   const liveChartOption: EChartsOption = {
     animation: false,
     grid: { top: 50, right: 40, bottom: 60, left: 70 },
-    title: { text: "Real-time Voltage", left: "center", textStyle: { fontSize: 14 } },
+    title: { text: `Real-time Voltage (최근 2분 표시, 누적 ${allData.length}건)`, left: "center", textStyle: { fontSize: 14 } },
     xAxis: {
       type: "category",
       data: liveData.map((d) => d.time),
@@ -319,7 +324,7 @@ export default function MonitoringPage() {
               api.get("/devices").then(({ data }) => setDevices(data.data));
               api.get("/gateways").then(({ data }) => setGateways(data.data));
             }} />
-            <Button icon={<DownloadOutlined />} onClick={handleExportCSV} disabled={liveData.length === 0 && historyData.length === 0}>
+            <Button icon={<DownloadOutlined />} onClick={handleExportCSV} disabled={allData.length === 0 && historyData.length === 0}>
               CSV Export
             </Button>
           </Space>
@@ -339,7 +344,7 @@ export default function MonitoringPage() {
                 {liveData.length > 0 && (
                   <Card size="small" style={{ marginBottom: 12 }}>
                     <Row gutter={16}>
-                      <Col span={4}><Statistic title="Data Points" value={liveStats.count} /></Col>
+                      <Col span={4}><Statistic title="Data Points (누적)" value={liveStats.count} /></Col>
                       <Col span={5}><Statistic title="Latest (mV)" value={liveStats.latest * 1000} precision={6} valueStyle={{ color: "#4472C4" }} /></Col>
                       <Col span={5}><Statistic title="Min (mV)" value={liveStats.min * 1000} precision={6} valueStyle={{ color: "#70AD47" }} /></Col>
                       <Col span={5}><Statistic title="Max (mV)" value={liveStats.max * 1000} precision={6} valueStyle={{ color: "#C0504D" }} /></Col>

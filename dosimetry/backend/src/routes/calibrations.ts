@@ -142,6 +142,67 @@ export async function calibrationRoutes(app: FastifyInstance) {
     };
   });
 
+  // POST /api/calibrations/calculate-from-csv — CSV 업로드 데이터로 스무딩/누적선량 계산
+  // 실시간 모니터링이나 ManageCalibration에서 export한 CSV를 그대로 사용 가능
+  app.post("/calculate-from-csv", async (request, reply) => {
+    const body = request.body as {
+      timestamps: number[];  // ms epoch
+      voltages: number[];    // V 단위
+      filterType?: FilterType;
+      windowSize?: number;
+      baseline?: number;
+    };
+
+    if (!Array.isArray(body.timestamps) || !Array.isArray(body.voltages)) {
+      return reply.status(400).send({ error: "timestamps와 voltages 배열이 필요합니다." });
+    }
+    if (body.timestamps.length !== body.voltages.length) {
+      return reply.status(400).send({ error: "timestamps와 voltages 길이가 일치해야 합니다." });
+    }
+    if (body.voltages.length < 2) {
+      return reply.status(400).send({ error: "최소 2개 이상의 샘플이 필요합니다." });
+    }
+
+    const filterType = body.filterType || "median";
+    const windowSize = body.windowSize || 10;
+    const baseline = body.baseline ?? 0;
+
+    const smoothedVoltages = applyFilter(body.voltages, filterType, windowSize);
+    const cumulativeDose = calculateCumulativeDose(body.timestamps, smoothedVoltages, baseline);
+
+    // 차트 다운샘플 (최대 2000 포인트)
+    const maxPoints = 2000;
+    const step = Math.max(1, Math.floor(body.voltages.length / maxPoints));
+    const chartData: Array<{ timestamp: Date; original: number; smoothed: number }> = [];
+    for (let i = 0; i < body.voltages.length; i += step) {
+      chartData.push({
+        timestamp: new Date(body.timestamps[i]),
+        original: body.voltages[i],
+        smoothed: smoothedVoltages[i],
+      });
+    }
+    const lastIdx = body.voltages.length - 1;
+    if (chartData.length === 0 || chartData[chartData.length - 1].timestamp.getTime() !== body.timestamps[lastIdx]) {
+      chartData.push({
+        timestamp: new Date(body.timestamps[lastIdx]),
+        original: body.voltages[lastIdx],
+        smoothed: smoothedVoltages[lastIdx],
+      });
+    }
+
+    return {
+      totalPoints: body.voltages.length,
+      filterType,
+      windowSize,
+      baseline,
+      cumulativeDose: Math.round(cumulativeDose * 100) / 100,
+      chartData,
+      // CSV 업로드는 deviceId 연계가 없으므로 시간범위만 반환
+      startTime: new Date(body.timestamps[0]).toISOString(),
+      endTime: new Date(body.timestamps[lastIdx]).toISOString(),
+    };
+  });
+
   // POST /api/calibrations — CF Factor 저장
   app.post("/", async (request, reply) => {
     const body = request.body as any;
@@ -171,6 +232,7 @@ export async function calibrationRoutes(app: FastifyInstance) {
         deliveredDose: body.deliveredDose,
         cfFactor,
         cfName: body.cfName || `CF_${new Date().toISOString().slice(0, 10)}`,
+        gatewayMac: body.gatewayMac || null,
       },
     });
 
@@ -228,6 +290,7 @@ export async function calibrationRoutes(app: FastifyInstance) {
       if (body.filterType !== undefined) data.filterType = body.filterType;
       if (body.windowSize !== undefined) data.windowSize = body.windowSize;
       if (body.baseline !== undefined) data.baseline = body.baseline;
+      if (body.gatewayMac !== undefined) data.gatewayMac = body.gatewayMac;
 
       const calibration = await prisma.calibration.update({
         where: { id: Number(id) },

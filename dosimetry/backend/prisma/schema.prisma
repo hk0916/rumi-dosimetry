@@ -139,6 +139,7 @@ model Calibration {
   deliveredDose  Decimal?         @map("delivered_dose") @db.Decimal(10, 4)
   cfFactor       Decimal?         @map("cf_factor") @db.Decimal(10, 4)
   cfName         String?          @map("cf_name") @db.VarChar(100)
+  gatewayMac     String?          @map("gateway_mac") @db.VarChar(30)
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
   device         Device           @relation(fields: [deviceId], references: [id])

@@ -1,16 +1,50 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  Card, Select, DatePicker, TimePicker, Button, InputNumber,
-  Space, Row, Col, Divider, message, Input, Descriptions, Tag, Modal,
+  Card, Select, DatePicker, Button, InputNumber,
+  Space, Row, Col, Divider, message, Input, Descriptions, Tag, Modal, Upload,
 } from "antd";
 import {
   SearchOutlined, SaveOutlined, CalculatorOutlined,
-  FilterOutlined, ReloadOutlined, InfoCircleOutlined,
+  FilterOutlined, ReloadOutlined, InfoCircleOutlined, UploadOutlined,
 } from "@ant-design/icons";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 import api from "../services/api";
 import dayjs from "dayjs";
+import customParseFormat from "dayjs/plugin/customParseFormat";
+
+dayjs.extend(customParseFormat);
+
+const { RangePicker } = DatePicker;
+
+// 공통 RangePicker presets
+const rangePresets: { label: string; value: [dayjs.Dayjs, dayjs.Dayjs] }[] = [
+  { label: "최근 15분",  value: [dayjs().subtract(15, "minute"), dayjs()] },
+  { label: "최근 30분",  value: [dayjs().subtract(30, "minute"), dayjs()] },
+  { label: "최근 1시간", value: [dayjs().subtract(1, "hour"),    dayjs()] },
+  { label: "최근 6시간", value: [dayjs().subtract(6, "hour"),    dayjs()] },
+  { label: "오늘",        value: [dayjs().startOf("day"),          dayjs()] },
+  { label: "어제",        value: [dayjs().subtract(1, "day").startOf("day"), dayjs().subtract(1, "day").endOf("day")] },
+  { label: "최근 7일",    value: [dayjs().subtract(7, "day"),     dayjs()] },
+];
+
+// CSV 타임스탬프 파서 (여러 포맷 fallback)
+function parseCsvTimestamp(raw: string): number {
+  const trimmed = raw.trim();
+  // 1차: dayjs 기본 파서 (ISO 및 일부 공통 포맷)
+  let d = dayjs(trimmed);
+  if (d.isValid()) return d.valueOf();
+  // 2차: space → T 로 ISO 변환
+  d = dayjs(trimmed.replace(" ", "T"));
+  if (d.isValid()) return d.valueOf();
+  // 3차: customParseFormat 명시
+  d = dayjs(trimmed, ["YYYY-MM-DD HH:mm:ss.SSS", "YYYY-MM-DD HH:mm:ss", "YYYY/MM/DD HH:mm:ss"], true);
+  if (d.isValid()) return d.valueOf();
+  // 4차: native Date
+  const nd = new Date(trimmed);
+  if (!isNaN(nd.getTime())) return nd.getTime();
+  return NaN;
+}
 
 const FILTER_OPTIONS = [
   { label: "Median", value: "median" },
@@ -32,10 +66,9 @@ export default function CalibrationPage() {
   const [devices, setDevices] = useState<any[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
 
-  // 데이터 조회 조건
-  const [date, setDate] = useState<dayjs.Dayjs | null>(null);
-  const [startTime, setStartTime] = useState<dayjs.Dayjs | null>(null);
-  const [endTime, setEndTime] = useState<dayjs.Dayjs | null>(null);
+  // 데이터 조회 조건 (full Dayjs — 날짜+시간)
+  const [startDateTime, setStartDateTime] = useState<dayjs.Dayjs | null>(null);
+  const [endDateTime, setEndDateTime] = useState<dayjs.Dayjs | null>(null);
 
   // 필터 설정
   const [filterType, setFilterType] = useState<string>("median");
@@ -47,27 +80,29 @@ export default function CalibrationPage() {
   const [totalPoints, setTotalPoints] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // 누적선량 범위 계산
-  const [rangeStartTime, setRangeStartTime] = useState<dayjs.Dayjs | null>(null);
-  const [rangeEndTime, setRangeEndTime] = useState<dayjs.Dayjs | null>(null);
+  // 누적선량 범위 계산 (full Dayjs — 날짜+시간)
+  const [rangeStart, setRangeStart] = useState<dayjs.Dayjs | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<dayjs.Dayjs | null>(null);
   const [cumulativeDose, setCumulativeDose] = useState<number | null>(null);
   const [calcLoading, setCalcLoading] = useState(false);
 
   // CF Factor
   const [deliveredDose, setDeliveredDose] = useState<number | null>(null);
   const [cfFactor, setCfFactor] = useState<number | null>(null);
-  const [cfName, setCfName] = useState("");
+  const [cfName, setCfName] = useState("");           // 닉네임 (필수)
+  const [gatewayMac, setGatewayMac] = useState<string | null>(null);  // 선택한 gateway MAC
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
 
-  // Gateway report interval 조회 (2분 딜레이 안내용)
+  // Gateway 목록 (캘리브레이션 시점에 사용한 게이트웨이 기록용)
+  const [gateways, setGateways] = useState<any[]>([]);
   const [gatewayReportInterval, setGatewayReportInterval] = useState<number | null>(null);
 
   useEffect(() => {
     api.get("/devices").then(({ data }) => setDevices(data.data)).catch(() => {});
-    // 연결된 게이트웨이들 중 가장 큰 reportInterval을 안내값으로 사용
     api.get("/gateways", { params: { size: "50" } })
       .then(({ data }) => {
+        setGateways(data.data || []);
         const intervals = (data.data || [])
           .map((g: any) => Number(g.reportInterval))
           .filter((v: number) => isFinite(v) && v > 0);
@@ -78,27 +113,22 @@ export default function CalibrationPage() {
       .catch(() => {});
   }, []);
 
-  // Import Data
+  // Import Data (DB 조회)
   const handleImportData = useCallback(async () => {
-    if (!selectedDeviceId || !date || !startTime || !endTime) {
-      message.warning("디바이스, 날짜, 시작/종료 시간을 모두 입력하세요.");
+    if (!selectedDeviceId || !startDateTime || !endDateTime) {
+      message.warning("디바이스와 시간 범위를 선택하세요.");
       return;
     }
-
-    const dateStr = date.format("YYYY-MM-DD");
-    const start = `${dateStr}T${startTime.format("HH:mm:ss")}`;
-    const end = `${dateStr}T${endTime.format("HH:mm:ss")}`;
 
     setLoading(true);
     setCumulativeDose(null);
     setCfFactor(null);
 
     try {
-      // baseline은 UI상 mV 단위, 백엔드는 V 단위로 전달
       const { data } = await api.post("/calibrations/calculate", {
         deviceId: selectedDeviceId,
-        startTime: start,
-        endTime: end,
+        startTime: startDateTime.toISOString(),
+        endTime: endDateTime.toISOString(),
         filterType,
         windowSize,
         baseline: baseline / 1000,
@@ -109,8 +139,8 @@ export default function CalibrationPage() {
       setCumulativeDose(data.cumulativeDose);
 
       // 기본 범위를 전체 범위로 설정
-      setRangeStartTime(startTime);
-      setRangeEndTime(endTime);
+      setRangeStart(startDateTime);
+      setRangeEnd(endDateTime);
 
       message.success(`${data.totalPoints}건 데이터 로드 완료. 누적선량: ${(data.cumulativeDose * 1000).toFixed(6)} mV·s`);
     } catch (err: any) {
@@ -118,38 +148,133 @@ export default function CalibrationPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDeviceId, date, startTime, endTime, filterType, windowSize, baseline]);
+  }, [selectedDeviceId, startDateTime, endDateTime, filterType, windowSize, baseline]);
 
-  // 필터 재적용
+  // CSV 업로드로 불러오기 (실시간 모니터링/ManageCalibration export 호환)
+  // 헤더 기반 컬럼 매핑: "Timestamp" + "Voltage(V)" 또는 "Voltage(mV)"
+  const handleImportCSV = useCallback(async (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        let text = String(e.target?.result || "");
+        // BOM 제거
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+        const rawLines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        if (rawLines.length < 2) {
+          message.error("CSV 파일에 유효한 데이터가 없습니다.");
+          return;
+        }
+
+        // 첫 헤더 라인 찾기 (메타 주석 # 은 스킵)
+        const headerIdx = rawLines.findIndex((l) => !l.trim().startsWith("#"));
+        if (headerIdx < 0) { message.error("CSV 헤더를 찾을 수 없습니다."); return; }
+
+        const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, "");
+        const headers = rawLines[headerIdx].split(",").map(normalize);
+
+        const tsIdx = headers.findIndex((h) => h === "timestamp" || h === "time");
+        let voltIdx = headers.findIndex((h) => h === "voltage(v)");
+        let voltInV = true;
+        if (voltIdx < 0) {
+          voltIdx = headers.findIndex((h) => h === "voltage(mv)");
+          voltInV = false;
+        }
+
+        if (tsIdx < 0 || voltIdx < 0) {
+          message.error(`CSV 헤더에 Timestamp와 Voltage(V/mV) 컬럼이 필요합니다. 발견된 헤더: ${headers.join(", ")}`);
+          return;
+        }
+
+        const timestamps: number[] = [];
+        const voltages: number[] = [];
+        let skipped = 0;
+
+        for (let i = headerIdx + 1; i < rawLines.length; i++) {
+          const line = rawLines[i];
+          if (line.trim().startsWith("#")) continue;
+          const cols = line.split(",");
+          if (cols.length <= Math.max(tsIdx, voltIdx)) { skipped++; continue; }
+
+          const tsMs = parseCsvTimestamp(cols[tsIdx]);
+          const voltRaw = Number(cols[voltIdx].trim());
+          if (!isFinite(tsMs) || !isFinite(voltRaw)) { skipped++; continue; }
+
+          timestamps.push(tsMs);
+          voltages.push(voltInV ? voltRaw : voltRaw / 1000);  // mV → V
+        }
+
+        console.log(`[CSV Import] parsed=${voltages.length} skipped=${skipped} firstTs=${timestamps[0]} lastTs=${timestamps[timestamps.length - 1]}`);
+
+        if (voltages.length < 2) {
+          message.error(`유효한 샘플이 부족합니다. (파싱됨: ${voltages.length}, 스킵됨: ${skipped})`);
+          return;
+        }
+
+        setLoading(true);
+        setCumulativeDose(null);
+        setCfFactor(null);
+
+        try {
+          const { data } = await api.post("/calibrations/calculate-from-csv", {
+            timestamps,
+            voltages,
+            filterType,
+            windowSize,
+            baseline: baseline / 1000,
+          });
+
+          setChartData(data.chartData);
+          setTotalPoints(data.totalPoints);
+          setCumulativeDose(data.cumulativeDose);
+
+          // CSV의 시간범위를 UI에 자동 반영
+          const firstTs = dayjs(data.startTime);
+          const lastTs = dayjs(data.endTime);
+          setStartDateTime(firstTs);
+          setEndDateTime(lastTs);
+          setRangeStart(firstTs);
+          setRangeEnd(lastTs);
+
+          message.success(`${data.totalPoints}건 로드 완료. 누적선량: ${(data.cumulativeDose * 1000).toFixed(6)} mV·s`);
+        } catch (err: any) {
+          message.error(err.response?.data?.error || "CSV 계산 요청에 실패했습니다.");
+        } finally {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("[CSV Import] parse error", err);
+        message.error("CSV 파싱 중 오류가 발생했습니다.");
+      }
+    };
+    reader.onerror = () => message.error("파일을 읽을 수 없습니다.");
+    reader.readAsText(file, "utf-8");
+  }, [filterType, windowSize, baseline]);
+
+  // 필터 재적용 (DB 모드 전용 — CSV 모드에서는 다시 Upload CSV 필요)
   const handleApplyFilter = useCallback(async () => {
-    if (!selectedDeviceId || !date || !startTime || !endTime) {
-      message.warning("먼저 데이터를 불러오세요.");
+    if (!selectedDeviceId || !startDateTime || !endDateTime) {
+      message.warning("먼저 데이터를 불러오세요. (CSV로 로드한 경우 다시 Upload CSV 하세요)");
       return;
     }
     await handleImportData();
-  }, [handleImportData]);
+  }, [handleImportData, selectedDeviceId, startDateTime, endDateTime]);
 
-  // 범위 지정 누적선량 재계산
+  // 범위 지정 누적선량 재계산 (DB 모드)
   const handleCalculateRange = useCallback(async () => {
-    if (!selectedDeviceId || !date || !rangeStartTime || !rangeEndTime) {
+    if (!selectedDeviceId || !startDateTime || !endDateTime || !rangeStart || !rangeEnd) {
       message.warning("계산 범위를 설정하세요.");
       return;
     }
-
-    const dateStr = date.format("YYYY-MM-DD");
-    const dataStart = `${dateStr}T${startTime?.format("HH:mm:ss") || "00:00:00"}`;
-    const dataEnd = `${dateStr}T${endTime?.format("HH:mm:ss") || "23:59:59"}`;
-    const rStart = `${dateStr}T${rangeStartTime.format("HH:mm:ss")}`;
-    const rEnd = `${dateStr}T${rangeEndTime.format("HH:mm:ss")}`;
 
     setCalcLoading(true);
     try {
       const { data } = await api.post("/calibrations/calculate-range", {
         deviceId: selectedDeviceId,
-        dataStartTime: dataStart,
-        dataEndTime: dataEnd,
-        rangeStartTime: rStart,
-        rangeEndTime: rEnd,
+        dataStartTime: startDateTime.toISOString(),
+        dataEndTime: endDateTime.toISOString(),
+        rangeStartTime: rangeStart.toISOString(),
+        rangeEndTime: rangeEnd.toISOString(),
         filterType,
         windowSize,
         baseline: baseline / 1000,
@@ -162,7 +287,7 @@ export default function CalibrationPage() {
     } finally {
       setCalcLoading(false);
     }
-  }, [selectedDeviceId, date, startTime, endTime, rangeStartTime, rangeEndTime, filterType, windowSize, baseline]);
+  }, [selectedDeviceId, startDateTime, endDateTime, rangeStart, rangeEnd, filterType, windowSize, baseline]);
 
   // CF Factor 계산 (V·s/cGy 단위로 보관; 표시 시 ×1000하여 mV·s/cGy로 변환)
   useEffect(() => {
@@ -181,7 +306,8 @@ export default function CalibrationPage() {
     }
     // 기본 CF Name 제안 (이미 입력한 값이 있으면 유지)
     if (!cfName) {
-      const suggested = `CF_${date?.format("YYYYMMDD") || dayjs().format("YYYYMMDD")}_${filterType}`;
+      const dateStr = startDateTime?.format("YYYYMMDD") || dayjs().format("YYYYMMDD");
+      const suggested = `CF_${dateStr}_${filterType}`;
       setCfName(suggested);
     }
     setSaveModalOpen(true);
@@ -194,23 +320,25 @@ export default function CalibrationPage() {
       return;
     }
 
-    const dateStr = date?.format("YYYY-MM-DD");
-    const rStart = rangeStartTime ? `${dateStr}T${rangeStartTime.format("HH:mm:ss")}` : undefined;
-    const rEnd = rangeEndTime ? `${dateStr}T${rangeEndTime.format("HH:mm:ss")}` : undefined;
+    if (!cfName || !cfName.trim()) {
+      message.warning("닉네임(CF Name)을 입력하세요.");
+      return;
+    }
 
     setSaveLoading(true);
     try {
       await api.post("/calibrations", {
         deviceId: selectedDeviceId,
-        date: dateStr,
+        date: startDateTime?.format("YYYY-MM-DD"),
         filterType,
         windowSize,
         baseline: baseline / 1000,
-        startTime: rStart,
-        endTime: rEnd,
+        startTime: rangeStart?.toISOString(),
+        endTime: rangeEnd?.toISOString(),
         cumulativeDose,
         deliveredDose,
-        cfName: cfName || undefined,
+        cfName: cfName.trim(),
+        gatewayMac: gatewayMac || undefined,
       });
       message.success("CF Factor가 저장되었습니다.");
       setSaveModalOpen(false);
@@ -314,27 +442,48 @@ export default function CalibrationPage() {
           </Col>
           <Col>
             <Space>
-              <span style={{ fontWeight: 600 }}>Date</span>
-              <DatePicker value={date} onChange={setDate} />
+              <span style={{ fontWeight: 600 }}>Range</span>
+              <RangePicker
+                showTime={{ format: "HH:mm:ss" }}
+                format="YYYY-MM-DD HH:mm:ss"
+                value={startDateTime && endDateTime ? [startDateTime, endDateTime] : null}
+                onChange={(v) => {
+                  if (v && v[0] && v[1]) {
+                    setStartDateTime(v[0]);
+                    setEndDateTime(v[1]);
+                  } else {
+                    setStartDateTime(null);
+                    setEndDateTime(null);
+                  }
+                }}
+                presets={rangePresets}
+              />
             </Space>
           </Col>
           <Col>
             <Space>
-              <span style={{ fontWeight: 600 }}>Start</span>
-              <TimePicker value={startTime} onChange={setStartTime} format="HH:mm:ss" />
-              <span style={{ fontWeight: 600 }}>End</span>
-              <TimePicker value={endTime} onChange={setEndTime} format="HH:mm:ss" />
+              <Button
+                type="primary"
+                icon={<SearchOutlined />}
+                onClick={handleImportData}
+                loading={loading}
+              >
+                Import Data
+              </Button>
+              <Upload
+                accept=".csv"
+                maxCount={1}
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  handleImportCSV(file);
+                  return false;  // 자동 업로드 방지 (수동 처리)
+                }}
+              >
+                <Button icon={<UploadOutlined />} loading={loading}>
+                  Upload CSV
+                </Button>
+              </Upload>
             </Space>
-          </Col>
-          <Col>
-            <Button
-              type="primary"
-              icon={<SearchOutlined />}
-              onClick={handleImportData}
-              loading={loading}
-            >
-              Import Data
-            </Button>
           </Col>
           {gatewayReportInterval != null && gatewayReportInterval > 30 && (
             <Col>
@@ -343,6 +492,40 @@ export default function CalibrationPage() {
               </Tag>
             </Col>
           )}
+        </Row>
+
+        <Divider style={{ margin: "12px 0" }} />
+
+        {/* 캘리브레이션 메타 (Nickname / Gateway) */}
+        <Row gutter={[16, 12]} align="middle">
+          <Col>
+            <Space>
+              <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Nickname</span>
+              <Input
+                value={cfName}
+                onChange={(e) => setCfName(e.target.value)}
+                placeholder="예: CF_20260422_median"
+                style={{ width: 260 }}
+                allowClear
+              />
+            </Space>
+          </Col>
+          <Col>
+            <Space>
+              <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Gateway</span>
+              <Select
+                allowClear
+                style={{ width: 280 }}
+                placeholder="사용한 Gateway 선택 (선택사항)"
+                value={gatewayMac}
+                onChange={(v) => setGatewayMac(v || null)}
+                options={gateways.map((g) => ({
+                  label: `${g.deviceName} (${g.macAddress})`,
+                  value: g.macAddress,
+                }))}
+              />
+            </Space>
+          </Col>
         </Row>
 
         <Divider style={{ margin: "12px 0" }} />
@@ -407,8 +590,9 @@ export default function CalibrationPage() {
         {chartData.length > 0 ? (
           <ReactECharts option={chartOption} style={{ height: 380 }} />
         ) : (
-          <div style={{ height: 380, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb" }}>
-            디바이스를 선택하고 Import Data를 클릭하세요.
+          <div style={{ height: 380, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", textAlign: "center" }}>
+            디바이스를 선택하고 Import Data를 클릭하거나,<br />
+            실시간 모니터링에서 export한 CSV를 Upload CSV로 불러오세요.
           </div>
         )}
       </Card>
@@ -423,20 +607,20 @@ export default function CalibrationPage() {
                 <div>
                   <span style={{ fontWeight: 600, marginRight: 8 }}>Calculation Range</span>
                   <Space>
-                    <TimePicker
-                      value={rangeStartTime}
-                      onChange={setRangeStartTime}
-                      format="HH:mm:ss"
-                      placeholder="Start"
+                    <RangePicker
+                      showTime={{ format: "HH:mm:ss" }}
+                      format="YYYY-MM-DD HH:mm:ss"
                       size="small"
-                    />
-                    <span>~</span>
-                    <TimePicker
-                      value={rangeEndTime}
-                      onChange={setRangeEndTime}
-                      format="HH:mm:ss"
-                      placeholder="End"
-                      size="small"
+                      value={rangeStart && rangeEnd ? [rangeStart, rangeEnd] : null}
+                      onChange={(v) => {
+                        if (v && v[0] && v[1]) {
+                          setRangeStart(v[0]);
+                          setRangeEnd(v[1]);
+                        } else {
+                          setRangeStart(null);
+                          setRangeEnd(null);
+                        }
+                      }}
                     />
                     <Button
                       size="small"
@@ -520,7 +704,7 @@ export default function CalibrationPage() {
       >
         <Descriptions bordered size="small" column={1} labelStyle={{ width: 140, fontWeight: 600 }}>
           <Descriptions.Item label="Device">{deviceName || "-"}</Descriptions.Item>
-          <Descriptions.Item label="Date">{date?.format("YYYY-MM-DD") || "-"}</Descriptions.Item>
+          <Descriptions.Item label="Date">{startDateTime?.format("YYYY-MM-DD") || "-"}</Descriptions.Item>
           <Descriptions.Item label="Filter">
             <Tag>{filterType}</Tag> Window <Tag>{windowSize}</Tag>
           </Descriptions.Item>

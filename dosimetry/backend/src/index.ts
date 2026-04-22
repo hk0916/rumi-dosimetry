@@ -19,7 +19,8 @@ import { authMiddleware } from "./middleware/auth.js";
 
 export const prisma = new PrismaClient();
 
-const app = Fastify({ logger: true });
+// bodyLimit 50MB — CSV 업로드 기반 calculate-from-csv 에서 수만 샘플 JSON 전송 허용
+const app = Fastify({ logger: true, bodyLimit: 50 * 1024 * 1024 });
 
 async function start() {
   await app.register(cors, { origin: true });

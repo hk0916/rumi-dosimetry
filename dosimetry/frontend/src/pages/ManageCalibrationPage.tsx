@@ -239,6 +239,12 @@ export default function ManageCalibrationPage() {
       dataIndex: ["device", "deviceName"],
     },
     {
+      title: "Gateway MAC",
+      dataIndex: "gatewayMac",
+      width: 160,
+      render: (v: string) => v ? <Tag color="geekblue" style={{ fontFamily: "monospace" }}>{v}</Tag> : <span style={{ color: "#bbb" }}>-</span>,
+    },
+    {
       title: "Filter",
       dataIndex: "filterType",
       render: (v: string) => <Tag>{v || "-"}</Tag>,
@@ -247,6 +253,20 @@ export default function ManageCalibrationPage() {
       title: "Window",
       dataIndex: "windowSize",
       width: 80,
+    },
+    {
+      title: "Time Range",
+      width: 210,
+      render: (_: any, r: any) =>
+        r.startTime && r.endTime
+          ? (
+            <span style={{ fontSize: 12 }}>
+              {dayjs(r.startTime).format("MM-DD HH:mm:ss")}
+              <br />
+              ~ {dayjs(r.endTime).format("MM-DD HH:mm:ss")}
+            </span>
+          )
+          : <span style={{ color: "#bbb" }}>-</span>,
     },
     {
       title: "Baseline",
@@ -363,9 +383,14 @@ export default function ManageCalibrationPage() {
               <Descriptions.Item label="Baseline" span={2}>
                 {selected.baseline != null ? `${(Number(selected.baseline) * 1000).toFixed(6)} mV` : "-"}
               </Descriptions.Item>
+              <Descriptions.Item label="Gateway MAC" span={3}>
+                {selected.gatewayMac
+                  ? <Tag color="geekblue" style={{ fontFamily: "monospace" }}>{selected.gatewayMac}</Tag>
+                  : <span style={{ color: "#bbb" }}>-</span>}
+              </Descriptions.Item>
               <Descriptions.Item label="Time Range" span={3}>
                 {selected.startTime && selected.endTime
-                  ? `${dayjs(selected.startTime).format("YYYY-MM-DD HH:mm:ss")} ~ ${dayjs(selected.endTime).format("HH:mm:ss")}`
+                  ? `${dayjs(selected.startTime).format("YYYY-MM-DD HH:mm:ss")} ~ ${dayjs(selected.endTime).format("YYYY-MM-DD HH:mm:ss")}`
                   : "-"}
               </Descriptions.Item>
               <Descriptions.Item label="Cumulative Dose" span={3}>
