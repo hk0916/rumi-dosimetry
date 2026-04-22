@@ -16,10 +16,39 @@ export async function userRoutes(app: FastifyInstance) {
         role: true,
         accountType: true,
         groupName: true,
+        workspaceId: true,
+        workspace: { select: { id: true, name: true } },
         createdAt: true,
       },
+      orderBy: { id: "asc" },
     });
     return { data: users, total: users.length };
+  });
+
+  // GET /api/users/groups — 중복 제거된 그룹 목록 (각 그룹의 멤버 수 포함)
+  app.get("/groups", async () => {
+    const rows = await prisma.user.groupBy({
+      by: ["groupName"],
+      _count: { _all: true },
+      orderBy: { groupName: "asc" },
+    });
+    const data = rows
+      .filter((r) => r.groupName != null && r.groupName !== "")
+      .map((r) => ({ name: r.groupName, memberCount: r._count._all }));
+    return { data, total: data.length };
+  });
+
+  // PUT /api/users/groups/rename — 그룹 일괄 이름 변경
+  app.put("/groups/rename", async (request, reply) => {
+    const body = request.body as { oldName?: string; newName?: string };
+    if (!body.oldName || !body.newName || body.newName.trim().length === 0) {
+      return reply.status(400).send({ error: "oldName과 newName은 필수입니다." });
+    }
+    const res = await prisma.user.updateMany({
+      where: { groupName: body.oldName },
+      data: { groupName: body.newName.trim() },
+    });
+    return { updated: res.count };
   });
 
   // POST /api/users
@@ -68,12 +97,14 @@ export async function userRoutes(app: FastifyInstance) {
       const data: any = {};
       if (body.name !== undefined) data.name = body.name;
       if (body.groupName !== undefined) data.groupName = body.groupName;
-      // role 변경은 super_admin만 가능하도록 제한
+      if (body.workspaceId !== undefined) data.workspaceId = body.workspaceId;
+      if (body.role !== undefined) data.role = body.role;
+      if (body.accountType !== undefined) data.accountType = body.accountType;
       const user = await prisma.user.update({
         where: { id: Number(id) },
         data,
       });
-      return { id: user.id, username: user.username, name: user.name, role: user.role };
+      return { id: user.id, username: user.username, name: user.name, role: user.role, groupName: user.groupName, workspaceId: user.workspaceId };
     } catch (err: any) {
       if (err.code === "P2025") {
         return reply.status(404).send({ error: "User not found" });

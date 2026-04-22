@@ -20,7 +20,8 @@ export async function analysisRoutes(app: FastifyInstance) {
   // POST /api/analysis/calculate — 4종 선량 계산
   app.post("/calculate", async (request, reply) => {
     const body = request.body as {
-      calibrationId: number;
+      calibrationId?: number;
+      calibrationIds?: number[];  // 다중 선택 시 평균 CF 사용
       radiationSource: string;
       targetOrgan: string;
       rangeType: string;       // "full" | "sub"
@@ -35,8 +36,14 @@ export async function analysisRoutes(app: FastifyInstance) {
       baseline?: number;
     };
 
-    if (!body.calibrationId || !body.radiationSource || !body.targetOrgan) {
-      return reply.status(400).send({ error: "calibrationId, radiationSource, targetOrgan은 필수입니다." });
+    // 다중 선택: calibrationIds가 있으면 첫 번째를 대표(calibrationId)로 사용
+    const multiIds: number[] = Array.isArray(body.calibrationIds) && body.calibrationIds.length > 0
+      ? body.calibrationIds
+      : (body.calibrationId ? [body.calibrationId] : []);
+    const primaryId = multiIds[0];
+
+    if (!primaryId || !body.radiationSource || !body.targetOrgan) {
+      return reply.status(400).send({ error: "calibrationId(s), radiationSource, targetOrgan은 필수입니다." });
     }
 
     // wR, wT 조회
@@ -63,19 +70,27 @@ export async function analysisRoutes(app: FastifyInstance) {
     let calcStartTime: string | undefined;
     let calcEndTime: string | undefined;
 
-    if (body.calibrationId) {
-      // Calibration 기반 계산
-      const calibration = await prisma.calibration.findUnique({
-        where: { id: body.calibrationId },
+    if (primaryId) {
+      // Calibration 기반 계산 (다중 선택 시 평균 CF 사용)
+      const calibrations = await prisma.calibration.findMany({
+        where: { id: { in: multiIds } },
       });
-      if (!calibration) {
+      if (calibrations.length === 0) {
         return reply.status(404).send({ error: "Calibration을 찾을 수 없습니다." });
       }
-      if (!calibration.cfFactor || Number(calibration.cfFactor) === 0) {
+
+      const cfs = calibrations
+        .map((c) => Number(c.cfFactor))
+        .filter((v) => isFinite(v) && v > 0);
+      if (cfs.length === 0) {
         return reply.status(400).send({ error: "CF Factor가 없는 Calibration입니다." });
       }
 
-      cfFactor = Number(calibration.cfFactor);
+      // 다중: 평균 / 단일: 그 값
+      cfFactor = cfs.reduce((a, b) => a + b, 0) / cfs.length;
+
+      // 대표 calibration(primary)의 설정으로 필터/범위 적용
+      const calibration = calibrations.find((c) => c.id === primaryId) || calibrations[0];
       deviceId = calibration.deviceId;
       filterType = calibration.filterType || "median";
       windowSize = calibration.windowSize || 10;
@@ -162,7 +177,7 @@ export async function analysisRoutes(app: FastifyInstance) {
     const user = (request as any).user;
     const result = await prisma.analysisResult.create({
       data: {
-        calibrationId: body.calibrationId,
+        calibrationId: primaryId,
         userId: user.id,
         radiationSource: body.radiationSource,
         targetOrgan: body.targetOrgan,
@@ -251,8 +266,11 @@ export async function analysisRoutes(app: FastifyInstance) {
   });
 
   // GET /api/analysis/:id/export — CSV 내보내기
+  // Query: type=summary|raw|smoothing (default=summary)
   app.get("/:id/export", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { type = "summary" } = request.query as { type?: string };
+
     const result = await prisma.analysisResult.findUnique({
       where: { id: Number(id) },
       include: {
@@ -265,32 +283,124 @@ export async function analysisRoutes(app: FastifyInstance) {
 
     if (!result) return reply.status(404).send({ error: "Not found" });
 
-    const lines = [
+    // 공통 헤더 (메타)
+    const cal = result.calibration;
+    const filterType = (cal?.filterType || "median") as FilterType;
+    const windowSize = cal?.windowSize || 10;
+    const baseline = Number(cal?.baseline) || 0;
+    const deviceId = cal?.deviceId;
+    const startTime = result.rangeType === "sub" && result.subRangeStart ? result.subRangeStart : cal?.startTime;
+    const endTime = result.rangeType === "sub" && result.subRangeEnd ? result.subRangeEnd : cal?.endTime;
+
+    const metaLines = [
       "Dosimetry Analysis Report",
       `Generated,${new Date().toISOString()}`,
+      `Report Type,${type}`,
       "",
-      "Device," + (result.calibration?.device?.deviceName || "N/A"),
-      "MAC Address," + (result.calibration?.device?.macAddress || "N/A"),
+      "Device," + (cal?.device?.deviceName || "N/A"),
+      "MAC Address," + (cal?.device?.macAddress || "N/A"),
       "User," + (result.user?.name || result.user?.username || "N/A"),
-      "CF Factor," + (result.calibration?.cfFactor || "N/A"),
-      "CF Name," + (result.calibration?.cfName || "N/A"),
-      "",
+      "CF Name," + (cal?.cfName || "N/A"),
+      "CF Factor," + (cal?.cfFactor || "N/A"),
+      "Filter Type," + (cal?.filterType || ""),
+      "Window Size," + (cal?.windowSize || ""),
+      `Baseline (mV),${(baseline * 1000).toFixed(6)}`,
+      "Range Type," + (result.rangeType || ""),
+      "Start Time," + (startTime?.toISOString() || ""),
+      "End Time," + (endTime?.toISOString() || ""),
       "Radiation Source," + (result.radiationSource || ""),
       "Target Organ," + (result.targetOrgan || ""),
-      "Range Type," + (result.rangeType || ""),
-      "Sub Range Start," + (result.subRangeStart?.toISOString() || ""),
-      "Sub Range End," + (result.subRangeEnd?.toISOString() || ""),
       "",
-      "Dose Type,Value,Unit",
-      `Cumulative Dose,${result.cumulativeDose},V·s`,
-      `Absorbed Dose,${result.absorbedDose},Gy`,
-      `Equivalent Dose,${result.equivalentDose},Sv`,
-      `Effective Dose,${result.effectiveDose},Sv`,
     ];
 
-    const csv = "\uFEFF" + lines.join("\n");
-    reply.header("Content-Type", "text/csv; charset=utf-8");
-    reply.header("Content-Disposition", `attachment; filename="analysis_${id}.csv"`);
-    return reply.send(csv);
+    // summary: dose summary only
+    if (type === "summary") {
+      const lines = [
+        ...metaLines,
+        "Dose Type,Value,Unit",
+        `Cumulative Dose (V·s),${result.cumulativeDose},V·s`,
+        `Cumulative Dose (mV·s),${(Number(result.cumulativeDose) * 1000).toFixed(6)},mV·s`,
+        `Absorbed Dose,${result.absorbedDose},Gy`,
+        `Equivalent Dose,${result.equivalentDose},Sv`,
+        `Effective Dose,${result.effectiveDose},Sv`,
+      ];
+      const csv = "\uFEFF" + lines.join("\n");
+      reply.header("Content-Type", "text/csv; charset=utf-8");
+      reply.header("Content-Disposition", `attachment; filename="analysis_${id}_summary.csv"`);
+      return reply.send(csv);
+    }
+
+    // raw / smoothing: 센서 데이터 필요
+    if (!deviceId || !startTime || !endTime) {
+      return reply.status(400).send({ error: "Calibration 범위 정보가 없어 raw/smoothing을 내보낼 수 없습니다." });
+    }
+
+    const sensorData = await prisma.sensorData.findMany({
+      where: {
+        deviceId,
+        timestamp: { gte: new Date(startTime), lte: new Date(endTime) },
+      },
+      orderBy: { timestamp: "asc" },
+      take: 200000,
+    });
+
+    if (sensorData.length === 0) {
+      return reply.status(400).send({ error: "데이터가 없습니다." });
+    }
+
+    const voltages = sensorData.map((d) => Number(d.voltage) || 0);
+
+    const RAW_MAX = 0xFFFFF;
+    const REF_V = 1.21;
+    const toRaw = (v: number) => Math.round((v * RAW_MAX) / REF_V);
+
+    if (type === "raw") {
+      const rows = sensorData.map((d, i) => {
+        const vV = voltages[i];
+        return [
+          i + 1,
+          d.timestamp.toISOString(),
+          toRaw(vV),
+          (vV * 1000).toString(),
+          vV.toString(),
+        ].join(",");
+      });
+      const lines = [
+        ...metaLines,
+        "Index,Timestamp,Raw,Voltage(mV),Voltage(V)",
+        ...rows,
+      ];
+      const csv = "\uFEFF" + lines.join("\n");
+      reply.header("Content-Type", "text/csv; charset=utf-8");
+      reply.header("Content-Disposition", `attachment; filename="analysis_${id}_raw.csv"`);
+      return reply.send(csv);
+    }
+
+    if (type === "smoothing") {
+      const smoothed = applyFilter(voltages, filterType, windowSize);
+      const rows = sensorData.map((d, i) => {
+        const vV = voltages[i];
+        const sV = smoothed[i];
+        return [
+          i + 1,
+          d.timestamp.toISOString(),
+          toRaw(vV),
+          (vV * 1000).toString(),
+          (sV * 1000).toString(),
+          (sV * 1000 - baseline * 1000).toString(),
+        ].join(",");
+      });
+      const lines = [
+        ...metaLines,
+        "Index,Timestamp,Raw,Original(mV),Smoothed(mV),Filtered(mV)",
+        ...rows,
+      ];
+      const csv = "\uFEFF" + lines.join("\n");
+      reply.header("Content-Type", "text/csv; charset=utf-8");
+      reply.header("Content-Disposition", `attachment; filename="analysis_${id}_smoothing.csv"`);
+      return reply.send(csv);
+    }
+
+    return reply.status(400).send({ error: "type은 summary|raw|smoothing이어야 합니다." });
   });
 }

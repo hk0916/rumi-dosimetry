@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Card, Select, DatePicker, TimePicker, Button, InputNumber,
-  Space, Row, Col, Divider, Statistic, message, Input, Descriptions, Tag,
+  Space, Row, Col, Divider, message, Input, Descriptions, Tag, Modal,
 } from "antd";
 import {
   SearchOutlined, SaveOutlined, CalculatorOutlined,
-  FilterOutlined, ReloadOutlined,
+  FilterOutlined, ReloadOutlined, InfoCircleOutlined,
 } from "@ant-design/icons";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
@@ -58,9 +58,24 @@ export default function CalibrationPage() {
   const [cfFactor, setCfFactor] = useState<number | null>(null);
   const [cfName, setCfName] = useState("");
   const [saveLoading, setSaveLoading] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+
+  // Gateway report interval 조회 (2분 딜레이 안내용)
+  const [gatewayReportInterval, setGatewayReportInterval] = useState<number | null>(null);
 
   useEffect(() => {
     api.get("/devices").then(({ data }) => setDevices(data.data)).catch(() => {});
+    // 연결된 게이트웨이들 중 가장 큰 reportInterval을 안내값으로 사용
+    api.get("/gateways", { params: { size: "50" } })
+      .then(({ data }) => {
+        const intervals = (data.data || [])
+          .map((g: any) => Number(g.reportInterval))
+          .filter((v: number) => isFinite(v) && v > 0);
+        if (intervals.length > 0) {
+          setGatewayReportInterval(Math.max(...intervals));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Import Data
@@ -79,13 +94,14 @@ export default function CalibrationPage() {
     setCfFactor(null);
 
     try {
+      // baseline은 UI상 mV 단위, 백엔드는 V 단위로 전달
       const { data } = await api.post("/calibrations/calculate", {
         deviceId: selectedDeviceId,
         startTime: start,
         endTime: end,
         filterType,
         windowSize,
-        baseline,
+        baseline: baseline / 1000,
       });
 
       setChartData(data.chartData);
@@ -96,7 +112,7 @@ export default function CalibrationPage() {
       setRangeStartTime(startTime);
       setRangeEndTime(endTime);
 
-      message.success(`${data.totalPoints}건 데이터 로드 완료. 누적선량: ${data.cumulativeDose} V·s`);
+      message.success(`${data.totalPoints}건 데이터 로드 완료. 누적선량: ${(data.cumulativeDose * 1000).toFixed(6)} mV·s`);
     } catch (err: any) {
       message.error(err.response?.data?.error || "데이터 조회에 실패했습니다.");
     } finally {
@@ -136,11 +152,11 @@ export default function CalibrationPage() {
         rangeEndTime: rEnd,
         filterType,
         windowSize,
-        baseline,
+        baseline: baseline / 1000,
       });
 
       setCumulativeDose(data.cumulativeDose);
-      message.success(`범위 내 ${data.dataPoints}건, 누적선량: ${data.cumulativeDose} V·s`);
+      message.success(`범위 내 ${data.dataPoints}건, 누적선량: ${(data.cumulativeDose * 1000).toFixed(6)} mV·s`);
     } catch (err: any) {
       message.error(err.response?.data?.error || "계산에 실패했습니다.");
     } finally {
@@ -148,14 +164,28 @@ export default function CalibrationPage() {
     }
   }, [selectedDeviceId, date, startTime, endTime, rangeStartTime, rangeEndTime, filterType, windowSize, baseline]);
 
-  // CF Factor 계산
+  // CF Factor 계산 (V·s/cGy 단위로 보관; 표시 시 ×1000하여 mV·s/cGy로 변환)
   useEffect(() => {
     if (cumulativeDose != null && deliveredDose && deliveredDose > 0) {
-      setCfFactor(Math.round((cumulativeDose / deliveredDose) * 100) / 100);
+      setCfFactor(cumulativeDose / deliveredDose);
     } else {
       setCfFactor(null);
     }
   }, [cumulativeDose, deliveredDose]);
+
+  // Save 모달 열기
+  const openSaveModal = () => {
+    if (cfFactor == null || !selectedDeviceId || cumulativeDose == null || !deliveredDose) {
+      message.warning("모든 계산을 완료한 후 저장하세요.");
+      return;
+    }
+    // 기본 CF Name 제안 (이미 입력한 값이 있으면 유지)
+    if (!cfName) {
+      const suggested = `CF_${date?.format("YYYYMMDD") || dayjs().format("YYYYMMDD")}_${filterType}`;
+      setCfName(suggested);
+    }
+    setSaveModalOpen(true);
+  };
 
   // CF Factor 저장
   const handleSave = async () => {
@@ -175,7 +205,7 @@ export default function CalibrationPage() {
         date: dateStr,
         filterType,
         windowSize,
-        baseline,
+        baseline: baseline / 1000,
         startTime: rStart,
         endTime: rEnd,
         cumulativeDose,
@@ -183,6 +213,7 @@ export default function CalibrationPage() {
         cfName: cfName || undefined,
       });
       message.success("CF Factor가 저장되었습니다.");
+      setSaveModalOpen(false);
     } catch (err: any) {
       message.error(err.response?.data?.error || "저장에 실패했습니다.");
     } finally {
@@ -205,14 +236,14 @@ export default function CalibrationPage() {
     },
     yAxis: {
       type: "value",
-      name: "Voltage (V)",
-      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) },
+      name: "Voltage (mV)",
+      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(3) },
     },
     series: [
       {
         name: "Original",
         type: "line",
-        data: chartData.map((d) => d.original),
+        data: chartData.map((d) => d.original * 1000),
         smooth: false,
         showSymbol: false,
         lineStyle: { color: "#4472C4", width: 1 },
@@ -226,9 +257,10 @@ export default function CalibrationPage() {
         lineStyle: { color: "#FFC000", width: 1.5, type: "dashed" },
       },
       {
+        // PDF 스펙: "해당 필터로 스무딩 된 [원본 - baseline] 차트" (초록차트)
         name: "Filtered",
         type: "line",
-        data: chartData.map((d) => d.smoothed),
+        data: chartData.map((d) => d.smoothed * 1000 - baseline),
         smooth: false,
         showSymbol: false,
         lineStyle: { color: "#70AD47", width: 2 },
@@ -241,7 +273,7 @@ export default function CalibrationPage() {
         let html = `<b>${time}</b><br/>`;
         for (const p of params) {
           if (p.seriesName !== "Baseline") {
-            html += `${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(6)} V<br/>`;
+            html += `${p.marker} ${p.seriesName}: ${Number(p.value)} mV<br/>`;
           }
         }
         return html;
@@ -304,6 +336,13 @@ export default function CalibrationPage() {
               Import Data
             </Button>
           </Col>
+          {gatewayReportInterval != null && gatewayReportInterval > 30 && (
+            <Col>
+              <Tag icon={<InfoCircleOutlined />} color="orange">
+                Gateway report interval: {gatewayReportInterval}s — 최근 {gatewayReportInterval}초 구간은 아직 수신되지 않았을 수 있습니다.
+              </Tag>
+            </Col>
+          )}
         </Row>
 
         <Divider style={{ margin: "12px 0" }} />
@@ -340,8 +379,9 @@ export default function CalibrationPage() {
               <InputNumber
                 value={baseline}
                 onChange={(v) => v != null && setBaseline(v)}
-                style={{ width: 100 }}
-                addonAfter="V"
+                style={{ width: 120 }}
+                addonAfter="mV"
+                step={0.001}
               />
             </Space>
           </Col>
@@ -421,9 +461,9 @@ export default function CalibrationPage() {
               >
                 <Descriptions.Item label="Cumulative Dose">
                   <span style={{ fontSize: 16, color: "#4472C4", fontWeight: 700 }}>
-                    {cumulativeDose != null ? cumulativeDose.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "-"}
+                    {cumulativeDose != null ? (cumulativeDose * 1000).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "-"}
                   </span>
-                  <span style={{ marginLeft: 4, color: "#888" }}>V·s</span>
+                  <span style={{ marginLeft: 4, color: "#888" }}>mV·s</span>
                 </Descriptions.Item>
                 <Descriptions.Item label="Delivered Dose">
                   <Space>
@@ -441,9 +481,9 @@ export default function CalibrationPage() {
                 </Descriptions.Item>
                 <Descriptions.Item label="CF Factor">
                   <span style={{ fontSize: 18, color: cfFactor != null ? "#70AD47" : "#ccc", fontWeight: 700 }}>
-                    {cfFactor != null ? cfFactor.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "-"}
+                    {cfFactor != null ? (cfFactor * 1000).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "-"}
                   </span>
-                  <span style={{ marginLeft: 4, color: "#888" }}>V·s/cGy</span>
+                  <span style={{ marginLeft: 4, color: "#888" }}>mV·s/cGy</span>
                 </Descriptions.Item>
               </Descriptions>
             </Col>
@@ -452,30 +492,60 @@ export default function CalibrationPage() {
           <Divider style={{ margin: "12px 0" }} />
 
           {/* 저장 */}
-          <Row justify="end" align="middle" gutter={12}>
-            <Col>
-              <Input
-                placeholder="CF Name (선택)"
-                value={cfName}
-                onChange={(e) => setCfName(e.target.value)}
-                style={{ width: 200 }}
-                size="small"
-              />
-            </Col>
+          <Row justify="end" align="middle">
             <Col>
               <Button
                 type="primary"
                 icon={<SaveOutlined />}
-                onClick={handleSave}
-                loading={saveLoading}
+                onClick={openSaveModal}
                 disabled={cfFactor == null}
               >
-                Save CF Factor
+                Save Calibration Factor
               </Button>
             </Col>
           </Row>
         </Card>
       )}
+
+      {/* Save Modal */}
+      <Modal
+        title="Save Calibration Factor"
+        open={saveModalOpen}
+        onCancel={() => setSaveModalOpen(false)}
+        onOk={handleSave}
+        okText="Save"
+        cancelText="Cancel"
+        confirmLoading={saveLoading}
+        width={500}
+      >
+        <Descriptions bordered size="small" column={1} labelStyle={{ width: 140, fontWeight: 600 }}>
+          <Descriptions.Item label="Device">{deviceName || "-"}</Descriptions.Item>
+          <Descriptions.Item label="Date">{date?.format("YYYY-MM-DD") || "-"}</Descriptions.Item>
+          <Descriptions.Item label="Filter">
+            <Tag>{filterType}</Tag> Window <Tag>{windowSize}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Baseline">{baseline.toFixed(6)} mV</Descriptions.Item>
+          <Descriptions.Item label="Cumulative Dose">
+            <span style={{ color: "#4472C4", fontWeight: 600 }}>
+              {cumulativeDose != null ? (cumulativeDose * 1000).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "-"} mV·s
+            </span>
+          </Descriptions.Item>
+          <Descriptions.Item label="Delivered Dose">{deliveredDose ?? "-"} cGy</Descriptions.Item>
+          <Descriptions.Item label="CF Factor">
+            <span style={{ color: "#70AD47", fontWeight: 700, fontSize: 15 }}>
+              {cfFactor != null ? (cfFactor * 1000).toFixed(6) : "-"} mV·s/cGy
+            </span>
+          </Descriptions.Item>
+        </Descriptions>
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>CF Name</div>
+          <Input
+            value={cfName}
+            onChange={(e) => setCfName(e.target.value)}
+            placeholder="이 Calibration의 이름을 입력하세요"
+          />
+        </div>
+      </Modal>
     </>
   );
 }

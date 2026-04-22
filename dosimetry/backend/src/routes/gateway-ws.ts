@@ -263,7 +263,12 @@ async function handleGetGwInfoResponse(app: FastifyInstance, socket: any, packet
   // MAC 주소로 소켓 매핑 등록
   registerGateway(socket, info.btMacAddr);
 
-  // DB 업데이트
+  // DB 업데이트 — uptime은 offline→online 전이 시점에만 갱신
+  const current = await prisma.gateway.findUnique({
+    where: { macAddress: info.btMacAddr },
+    select: { status: true, uptime: true },
+  });
+  const shouldSetUptime = !current || current.status !== "online" || !current.uptime;
   await prisma.gateway.updateMany({
     where: { macAddress: info.btMacAddr },
     data: {
@@ -275,7 +280,7 @@ async function handleGetGwInfoResponse(app: FastifyInstance, socket: any, packet
       wsServerUrl: info.wsServerUrl,
       bleRssiThreshold: info.rssiFilter,
       reportInterval: info.reportInterval,
-      uptime: new Date(),
+      ...(shouldSetUptime ? { uptime: new Date() } : {}),
     },
   });
 }
@@ -288,7 +293,12 @@ async function handleGwInfoIndication(app: FastifyInstance, socket: any, packet:
   // MAC 매핑 (아직 없는 경우)
   registerGateway(socket, info.btMacAddr);
 
-  // DB 업데이트
+  // DB 업데이트 — uptime은 offline→online 전이 시점에만 갱신
+  const current = await prisma.gateway.findUnique({
+    where: { macAddress: info.btMacAddr },
+    select: { status: true, uptime: true },
+  });
+  const shouldSetUptime = !current || current.status !== "online" || !current.uptime;
   await prisma.gateway.updateMany({
     where: { macAddress: info.btMacAddr },
     data: {
@@ -300,7 +310,7 @@ async function handleGwInfoIndication(app: FastifyInstance, socket: any, packet:
       wsServerUrl: info.wsServerUrl,
       bleRssiThreshold: info.rssiFilter,
       reportInterval: info.reportInterval,
-      uptime: new Date(),
+      ...(shouldSetUptime ? { uptime: new Date() } : {}),
     },
   });
 
@@ -325,7 +335,8 @@ async function handleTagDataIndication(app: FastifyInstance, socket: any, packet
     // ADC raw → Voltage (V): raw * 1.21 / 0xFFFFF
     const voltage = (tag.beacon.doseAdc * 1.21) / 0xFFFFF;
 
-    // 디바이스 상태 업데이트
+    // 디바이스 상태 업데이트 — uptime은 offline→online 전이 시점에만 갱신
+    const shouldSetUptimeD = device.status !== "online" || !device.uptime;
     await prisma.device.update({
       where: { id: device.id },
       data: {
@@ -337,7 +348,7 @@ async function handleTagDataIndication(app: FastifyInstance, socket: any, packet
         txPower: tag.beacon.txPower,
         advertisingCount: tag.beacon.advertisingCount,
         localName: tag.beacon.localName,
-        uptime: new Date(),
+        ...(shouldSetUptimeD ? { uptime: new Date() } : {}),
       },
     });
 
@@ -404,6 +415,8 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
     const voltage = lastDose ? toVolt(lastDose.doseSensingVal) : undefined;
     const advertisingCount = lastDose ? lastDose.advCount : undefined;
 
+    // uptime은 offline→online 전이 시점에만 갱신
+    const shouldSetUptimeD = device.status !== "online" || !device.uptime;
     await prisma.device.update({
       where: { id: device.id },
       data: {
@@ -413,11 +426,15 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
         battery: dose.battery,
         temperature: Math.round(dose.temperature * 100),
         advertisingCount,
-        uptime: new Date(),
+        ...(shouldSetUptimeD ? { uptime: new Date() } : {}),
       },
     });
 
     // 각 dose entry는 25ms 간격으로 센싱됨 → 마지막 entry를 기준으로 역산
+    // NOTE: Gateway는 reportInterval(기본 ~120s) 동안 센서 샘플을 누적한 뒤 한 번에 전송한다.
+    //       따라서 packet 수신 시점(Date.now())은 "배치 내 마지막 샘플"의 실제 센싱 시각에 해당한다.
+    //       즉 Calibration 조회 시 "최근 2분" 범위에는 아직 배치가 도착하지 않아 비어 보일 수 있다.
+    //       이는 펌웨어 프로토콜 특성이며, 서버 측에서 추가로 개선할 수 없다.
     const n = dose.doseData.length;
     const lastMs = Date.now();
     for (let i = 0; i < n; i++) {

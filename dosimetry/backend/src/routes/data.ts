@@ -22,10 +22,18 @@ export async function dataRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "gateway_mac and devices array are required" });
     }
 
-    // Gateway 상태 업데이트
+    // Gateway 상태 업데이트 — uptime은 offline→online 전이 시점에만 갱신
+    const currentGw = await prisma.gateway.findUnique({
+      where: { macAddress: body.gateway_mac },
+      select: { status: true, uptime: true },
+    });
+    const shouldSetGwUptime = !currentGw || currentGw.status !== "online" || !currentGw.uptime;
     await prisma.gateway.updateMany({
       where: { macAddress: body.gateway_mac },
-      data: { status: "online", uptime: new Date() },
+      data: {
+        status: "online",
+        ...(shouldSetGwUptime ? { uptime: new Date() } : {}),
+      },
     });
 
     const results = [];
@@ -44,7 +52,8 @@ export async function dataRoutes(app: FastifyInstance) {
       const ts = d.timestamp ? new Date(d.timestamp) : new Date();
       if (isNaN(ts.getTime())) continue;
 
-      // Device 상태 업데이트
+      // Device 상태 업데이트 — uptime은 offline→online 전이 시점에만 갱신
+      const shouldSetUptimeD = device.status !== "online" || !device.uptime;
       await prisma.device.update({
         where: { id: device.id },
         data: {
@@ -52,7 +61,7 @@ export async function dataRoutes(app: FastifyInstance) {
           voltage: d.voltage,
           rssi: d.rssi,
           battery: d.battery,
-          uptime: new Date(),
+          ...(shouldSetUptimeD ? { uptime: new Date() } : {}),
         },
       });
 

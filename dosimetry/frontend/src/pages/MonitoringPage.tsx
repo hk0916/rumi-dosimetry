@@ -162,10 +162,12 @@ export default function MonitoringPage() {
     }
 
     const deviceName = devices.find((d) => d.id === selectedDeviceId)?.deviceName || "unknown";
+    // raw(20-bit ADC, endian 변환 적용된 원본) = round(voltage(V) * 0xFFFFF / 1.21)
+    const toRaw = (v: number) => Math.round((Number(v) * 0xFFFFF) / 1.21);
     const csv = [
-      "ID,Timestamp,Voltage(V)",
+      "ID,Timestamp,Raw,Voltage(mV),Voltage(V)",
       ...dataToExport.map((d) =>
-        `${d.id},${dayjs(d.timestamp).format("YYYY-MM-DD HH:mm:ss.SSS")},${d.voltage}`
+        `${d.id},${dayjs(d.timestamp).format("YYYY-MM-DD HH:mm:ss.SSS")},${toRaw(d.voltage)},${Number(d.voltage) * 1000},${Number(d.voltage)}`
       ),
     ].join("\n");
 
@@ -191,12 +193,12 @@ export default function MonitoringPage() {
     },
     yAxis: {
       type: "value",
-      name: "Voltage (V)",
-      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) },
+      name: "Voltage (mV)",
+      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(3) },
     },
     series: [{
       type: "line",
-      data: liveData.map((d) => d.voltage),
+      data: liveData.map((d) => d.voltage * 1000),
       smooth: true,
       showSymbol: false,
       lineStyle: { color: "#4472C4", width: 2 },
@@ -204,7 +206,7 @@ export default function MonitoringPage() {
     }],
     tooltip: { trigger: "axis", formatter: (params: any) => {
       const p = params[0];
-      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value).toFixed(6)} V</b>`;
+      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value)} mV</b>`;
     }},
     dataZoom: [
       { type: "inside", start: 0, end: 100 },
@@ -232,12 +234,12 @@ export default function MonitoringPage() {
     },
     yAxis: {
       type: "value",
-      name: "Voltage (V)",
-      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) },
+      name: "Voltage (mV)",
+      axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(3) },
     },
     series: [{
       type: "line",
-      data: historyData.map((d) => d.voltage),
+      data: historyData.map((d) => d.voltage * 1000),
       smooth: false,
       showSymbol: historyData.length < 100,
       symbolSize: 4,
@@ -246,7 +248,7 @@ export default function MonitoringPage() {
     }],
     tooltip: { trigger: "axis", formatter: (params: any) => {
       const p = params[0];
-      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value).toFixed(6)} V</b>`;
+      return `${p.axisValue}<br/>Voltage: <b>${Number(p.value)} mV</b>`;
     }},
     dataZoom: [
       { type: "inside", start: 0, end: 100 },
@@ -277,9 +279,9 @@ export default function MonitoringPage() {
       render: (v: string) => dayjs(v).format("YYYY-MM-DD HH:mm:ss.SSS"),
     },
     {
-      title: "Voltage (V)",
+      title: "Voltage (mV)",
       dataIndex: "voltage",
-      render: (v: number) => Number(v).toFixed(6),
+      render: (v: number) => (Number(v) * 1000).toFixed(6),
       sorter: (a: SensorRecord, b: SensorRecord) => a.voltage - b.voltage,
     },
   ];
@@ -338,10 +340,10 @@ export default function MonitoringPage() {
                   <Card size="small" style={{ marginBottom: 12 }}>
                     <Row gutter={16}>
                       <Col span={4}><Statistic title="Data Points" value={liveStats.count} /></Col>
-                      <Col span={5}><Statistic title="Latest (V)" value={liveStats.latest} precision={6} valueStyle={{ color: "#4472C4" }} /></Col>
-                      <Col span={5}><Statistic title="Min (V)" value={liveStats.min} precision={6} valueStyle={{ color: "#70AD47" }} /></Col>
-                      <Col span={5}><Statistic title="Max (V)" value={liveStats.max} precision={6} valueStyle={{ color: "#C0504D" }} /></Col>
-                      <Col span={5}><Statistic title="Avg (V)" value={liveStats.avg} precision={6} /></Col>
+                      <Col span={5}><Statistic title="Latest (mV)" value={liveStats.latest * 1000} precision={6} valueStyle={{ color: "#4472C4" }} /></Col>
+                      <Col span={5}><Statistic title="Min (mV)" value={liveStats.min * 1000} precision={6} valueStyle={{ color: "#70AD47" }} /></Col>
+                      <Col span={5}><Statistic title="Max (mV)" value={liveStats.max * 1000} precision={6} valueStyle={{ color: "#C0504D" }} /></Col>
+                      <Col span={5}><Statistic title="Avg (mV)" value={liveStats.avg * 1000} precision={6} /></Col>
                     </Row>
                   </Card>
                 )}

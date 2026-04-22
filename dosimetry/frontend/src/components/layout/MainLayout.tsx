@@ -7,6 +7,7 @@ import {
   DatabaseOutlined,
   BarChartOutlined,
   UserOutlined,
+  TeamOutlined,
   LogoutOutlined,
   GlobalOutlined,
   CloudUploadOutlined,
@@ -27,6 +28,7 @@ export default function MainLayout() {
     { key: "manage-calibration", icon: <DatabaseOutlined />, label: t("nav.manage_calibration") },
     { key: "data-analysis", icon: <BarChartOutlined />, label: t("nav.data_analysis") },
     { key: "ota", icon: <CloudUploadOutlined />, label: t("nav.ota") },
+    { key: "manage-users", icon: <TeamOutlined />, label: t("nav.manage_users") },
     { key: "settings", icon: <UserOutlined />, label: t("nav.settings") },
   ];
 

@@ -28,10 +28,18 @@ export async function mockRoutes(app: FastifyInstance) {
     // 최소 100ms 제한
     const safeInterval = Math.max(100, intervalMs);
 
-    // Gateway 상태 업데이트
+    // Gateway 상태 업데이트 — uptime은 offline→online 전이 시점에만 갱신
+    const currentGw = await prisma.gateway.findUnique({
+      where: { macAddress: gatewayMac },
+      select: { status: true, uptime: true },
+    });
+    const shouldSetGwUptime = !currentGw || currentGw.status !== "online" || !currentGw.uptime;
     await prisma.gateway.updateMany({
       where: { macAddress: gatewayMac },
-      data: { status: "online", uptime: new Date() },
+      data: {
+        status: "online",
+        ...(shouldSetGwUptime ? { uptime: new Date() } : {}),
+      },
     });
 
     let tick = 0;
@@ -57,12 +65,14 @@ export async function mockRoutes(app: FastifyInstance) {
           const temperature = 2200 + Math.floor(Math.random() * 300);
           const advertisingCount = tick * 3;
 
+          // uptime은 offline→online 전이 시점에만 갱신
+          const shouldSetUptimeD = device.status !== "online" || !device.uptime;
           await prisma.device.update({
             where: { id: device.id },
             data: {
               status: "online", voltage, rssi, battery,
               temperature, txPower: -4, advertisingCount, localName: "P_LAB",
-              uptime: new Date(),
+              ...(shouldSetUptimeD ? { uptime: new Date() } : {}),
             },
           });
 

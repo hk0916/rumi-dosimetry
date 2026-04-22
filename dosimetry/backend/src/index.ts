@@ -7,6 +7,7 @@ import { authRoutes } from "./routes/auth.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { gatewayRoutes } from "./routes/gateways.js";
 import { userRoutes } from "./routes/users.js";
+import { workspaceRoutes } from "./routes/workspaces.js";
 import { dataRoutes } from "./routes/data.js";
 import { monitoringRoutes } from "./routes/monitoring.js";
 
@@ -37,6 +38,7 @@ async function start() {
   await app.register(deviceRoutes, { prefix: "/api/devices" });
   await app.register(gatewayRoutes, { prefix: "/api/gateways" });
   await app.register(userRoutes, { prefix: "/api/users" });
+  await app.register(workspaceRoutes, { prefix: "/api/workspaces" });
   await app.register(dataRoutes, { prefix: "/api/data" });
   await app.register(monitoringRoutes, { prefix: "/ws" });
   await app.register(gatewayWsRoutes, { prefix: "/ws" });

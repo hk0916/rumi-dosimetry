@@ -29,6 +29,7 @@ export default {
     data_analysis: "데이터 분석",
     settings: "사용자 설정",
     ota: "OTA 업데이트",
+    manage_users: "사용자 관리",
     logout: "로그아웃",
   },
 

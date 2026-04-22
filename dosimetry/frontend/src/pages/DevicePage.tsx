@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Tabs, Table, Button, Tag, Modal, Descriptions, message, Popconfirm,
-  Form, Input, Select, Switch, InputNumber, Upload, Divider,
+  Form, Input, Select, Switch, InputNumber, Upload, Divider, Space,
 } from "antd";
 import { PlusOutlined, ReloadOutlined, UploadOutlined, EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -29,6 +29,21 @@ export default function DevicePage() {
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const [addGatewayOpen, setAddGatewayOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoReload, setAutoReload] = useState<number>(5);
+  const [deviceDetail, setDeviceDetail] = useState<any>(null);
+
+  // 선택된 Dosimeter의 상세(Last monitored by 포함) 조회
+  useEffect(() => {
+    if (!selectedDevice) {
+      setDeviceDetail(null);
+      return;
+    }
+    let cancelled = false;
+    api.get(`/devices/${selectedDevice.id}`)
+      .then(({ data }) => { if (!cancelled) setDeviceDetail(data); })
+      .catch(() => { if (!cancelled) setDeviceDetail(null); });
+    return () => { cancelled = true; };
+  }, [selectedDevice?.id]);
 
   // 인라인 이름 편집 상태
   const [editingName, setEditingName] = useState<"device" | "gateway" | null>(null);
@@ -66,6 +81,16 @@ export default function DevicePage() {
     fetchDosimeters();
     fetchGateways();
   }, []);
+
+  // Auto Reload — 주기적으로 디바이스/게이트웨이 재조회
+  useEffect(() => {
+    if (!autoReload || autoReload < 1) return;
+    const timer = setInterval(() => {
+      fetchDosimeters();
+      fetchGateways();
+    }, autoReload * 1000);
+    return () => clearInterval(timer);
+  }, [autoReload]);
 
   // When gateway is selected, populate setting form
   useEffect(() => {
@@ -242,7 +267,7 @@ export default function DevicePage() {
     { title: "MAC Address", dataIndex: "macAddress" },
     { title: "Battery", dataIndex: "battery", render: (v: number) => v != null ? `${v}%` : "-" },
     { title: "RSSI", dataIndex: "rssi", render: (v: number) => v != null ? `${v}dBm` : "-" },
-    { title: "Voltage", dataIndex: "voltage", render: (v: string) => v || "-" },
+    { title: "Voltage (mV)", dataIndex: "voltage", render: (v: any) => v != null ? (Number(v) * 1000).toFixed(2) : "-" },
     { title: "Uptime", dataIndex: "uptime", render: (v: string) => v ? dayjs(v).format("YYYY-MM-DD HH:mm:ss") : "-" },
   ];
 
@@ -259,6 +284,20 @@ export default function DevicePage() {
     <>
       <Tabs
         defaultActiveKey="dosimeter"
+        tabBarExtraContent={
+          <Space size={6}>
+            <span style={{ fontWeight: 600, color: "#666" }}>Auto Reload</span>
+            <InputNumber
+              min={1}
+              max={3600}
+              value={autoReload}
+              onChange={(v) => v != null && setAutoReload(v)}
+              addonAfter="s"
+              style={{ width: 110 }}
+              size="small"
+            />
+          </Space>
+        }
         items={[
           {
             key: "dosimeter",
@@ -332,8 +371,22 @@ export default function DevicePage() {
             <Descriptions.Item label="Status"><Tag color={selectedDevice.status === "online" ? "green" : "default"}>{selectedDevice.status}</Tag></Descriptions.Item>
             <Descriptions.Item label="Battery">{selectedDevice.battery != null ? `${selectedDevice.battery}%` : "-"}</Descriptions.Item>
             <Descriptions.Item label="RSSI">{selectedDevice.rssi != null ? `${selectedDevice.rssi}dBm` : "-"}</Descriptions.Item>
-            <Descriptions.Item label="Voltage">{selectedDevice.voltage || "-"}</Descriptions.Item>
+            <Descriptions.Item label="Voltage (mV)">{selectedDevice.voltage != null ? (Number(selectedDevice.voltage) * 1000).toFixed(2) : "-"}</Descriptions.Item>
             <Descriptions.Item label="Uptime">{selectedDevice.uptime ? dayjs(selectedDevice.uptime).format("YYYY-MM-DD HH:mm:ss") : "-"}</Descriptions.Item>
+            <Descriptions.Item label="Last monitored by">
+              {deviceDetail?.lastMonitoredBy ? (
+                <div>
+                  <div>
+                    <strong>{deviceDetail.lastMonitoredBy.gatewayName || "(unknown gateway)"}</strong>
+                    {" "}
+                    <span style={{ color: "#888" }}>{deviceDetail.lastMonitoredBy.gatewayMac}</span>
+                  </div>
+                  <div style={{ color: "#888", fontSize: 12 }}>
+                    {dayjs(deviceDetail.lastMonitoredBy.at).format("YYYY-MM-DD HH:mm:ss")}
+                  </div>
+                </div>
+              ) : "-"}
+            </Descriptions.Item>
           </Descriptions>
         )}
       </Modal>
@@ -354,6 +407,7 @@ export default function DevicePage() {
               label: "Device",
               children: (
                 <>
+                  <Divider orientation="left" plain style={{ fontSize: 13, marginTop: 0 }}>Device Info</Divider>
                   <Descriptions column={1} bordered size="small">
                     <Descriptions.Item label="Device Name">
                       {renderEditableName("gateway", selectedGateway.deviceName, saveGatewayName)}
@@ -362,16 +416,36 @@ export default function DevicePage() {
                     <Descriptions.Item label="Device Type">{selectedGateway.deviceType}</Descriptions.Item>
                     <Descriptions.Item label="Status"><Tag color={selectedGateway.status === "online" ? "green" : "default"}>{selectedGateway.status}</Tag></Descriptions.Item>
                     <Descriptions.Item label="Uptime">{selectedGateway.uptime ? dayjs(selectedGateway.uptime).format("YYYY-MM-DD HH:mm:ss") : "-"}</Descriptions.Item>
+                  </Descriptions>
+
+                  <Divider orientation="left" plain style={{ fontSize: 13 }}>Server URL</Divider>
+                  <Descriptions column={1} bordered size="small">
                     <Descriptions.Item label="Server IP">{selectedGateway.serverIp}</Descriptions.Item>
                     <Descriptions.Item label="Server URL">{selectedGateway.serverUrl}</Descriptions.Item>
+                  </Descriptions>
+
+                  <Divider orientation="left" plain style={{ fontSize: 13 }}>TCP/IP</Divider>
+                  <Descriptions column={1} bordered size="small">
                     <Descriptions.Item label="IPv4 Mode">{selectedGateway.ipv4Mode}</Descriptions.Item>
                     <Descriptions.Item label="IP Address">{selectedGateway.ipAddress}</Descriptions.Item>
                     <Descriptions.Item label="Subnet Mask">{selectedGateway.subnetMask}</Descriptions.Item>
                     <Descriptions.Item label="Gateway IP">{selectedGateway.gatewayIp}</Descriptions.Item>
                     <Descriptions.Item label="DNS Main">{selectedGateway.dnsMain}</Descriptions.Item>
                     <Descriptions.Item label="DNS Sub">{selectedGateway.dnsSub}</Descriptions.Item>
+                  </Descriptions>
+
+                  <Divider orientation="left" plain style={{ fontSize: 13 }}>Interface</Divider>
+                  <Descriptions column={1} bordered size="small">
                     <Descriptions.Item label="LED">{selectedGateway.ledEnabled ? "ON" : "OFF"}</Descriptions.Item>
+                  </Descriptions>
+
+                  <Divider orientation="left" plain style={{ fontSize: 13 }}>BLE Setting</Divider>
+                  <Descriptions column={1} bordered size="small">
                     <Descriptions.Item label="BLE RSSI Threshold">{selectedGateway.bleRssiThreshold}</Descriptions.Item>
+                  </Descriptions>
+
+                  <Divider orientation="left" plain style={{ fontSize: 13 }}>Firmware</Divider>
+                  <Descriptions column={1} bordered size="small">
                     <Descriptions.Item label="Device Firmware">{selectedGateway.deviceFwVersion || "-"}</Descriptions.Item>
                     <Descriptions.Item label="BLE Firmware">{selectedGateway.bleFwVersion || "-"}</Descriptions.Item>
                   </Descriptions>

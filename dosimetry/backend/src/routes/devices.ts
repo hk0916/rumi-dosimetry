@@ -20,12 +20,33 @@ export async function deviceRoutes(app: FastifyInstance) {
     return { data: devices, total, page: pageNum, size: sizeNum };
   });
 
-  // GET /api/devices/:id
+  // GET /api/devices/:id — 상세 (Last monitored by 포함)
   app.get("/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const device = await prisma.device.findUnique({ where: { id: Number(id) } });
     if (!device) return reply.status(404).send({ error: "Device not found" });
-    return device;
+
+    // 가장 최근 sensor_data 1건으로 Last monitored by(수신 Gateway) 조회
+    const latest = await prisma.sensorData.findFirst({
+      where: { deviceId: device.id, gatewayMac: { not: null } },
+      orderBy: { timestamp: "desc" },
+      select: { gatewayMac: true, timestamp: true },
+    });
+
+    let lastMonitoredBy: { gatewayMac: string; gatewayName: string | null; at: Date } | null = null;
+    if (latest?.gatewayMac) {
+      const gw = await prisma.gateway.findUnique({
+        where: { macAddress: latest.gatewayMac },
+        select: { deviceName: true },
+      });
+      lastMonitoredBy = {
+        gatewayMac: latest.gatewayMac,
+        gatewayName: gw?.deviceName ?? null,
+        at: latest.timestamp,
+      };
+    }
+
+    return { ...device, lastMonitoredBy };
   });
 
   // POST /api/devices

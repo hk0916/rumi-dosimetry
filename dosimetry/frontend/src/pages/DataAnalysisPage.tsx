@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Card, Select, Button, Space, Row, Col, Divider, message,
-  Descriptions, Tag, Table, TimePicker, Radio, Popconfirm, Statistic,
+  Tag, Table, TimePicker, Radio, Popconfirm, Statistic, Dropdown,
 } from "antd";
+import type { MenuProps } from "antd";
 import {
   CalculatorOutlined, DownloadOutlined, DeleteOutlined, ReloadOutlined,
+  FileTextOutlined, FileExcelOutlined, FileSearchOutlined,
 } from "@ant-design/icons";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
@@ -34,9 +36,10 @@ interface AnalysisResult {
 }
 
 export default function DataAnalysisPage() {
-  // Calibration 목록
+  // Calibration 목록 (다중 선택 가능 — 선택 시 CF Factor 평균 사용)
   const [calibrations, setCalibrations] = useState<any[]>([]);
-  const [selectedCalibrationId, setSelectedCalibrationId] = useState<number | null>(null);
+  const [selectedCalibrationIds, setSelectedCalibrationIds] = useState<number[]>([]);
+  const selectedCalibrationId = selectedCalibrationIds[0] ?? null;
 
   // Weighting Factors
   const [radiationFactors, setRadiationFactors] = useState<WeightingFactor[]>([]);
@@ -124,9 +127,15 @@ export default function DataAnalysisPage() {
     }
   }, [selectedCalibrationId]);
 
+  // 다중 선택 시 평균 CF 계산 (UI 표시용)
+  const selectedCalibrations = calibrations.filter((c) => selectedCalibrationIds.includes(c.id));
+  const avgCfFactor = selectedCalibrations.length > 0
+    ? selectedCalibrations.reduce((sum, c) => sum + (Number(c.cfFactor) || 0), 0) / selectedCalibrations.length
+    : 0;
+
   // Calculate
   const handleCalculate = async () => {
-    if (!selectedCalibrationId || !radiationSource || !targetOrgan) {
+    if (selectedCalibrationIds.length === 0 || !radiationSource || !targetOrgan) {
       message.warning("Calibration, 방사선 종류, 장기를 모두 선택하세요.");
       return;
     }
@@ -136,6 +145,7 @@ export default function DataAnalysisPage() {
       const cal = selectedCalibration;
       const payload: any = {
         calibrationId: selectedCalibrationId,
+        calibrationIds: selectedCalibrationIds,  // 다중 선택 시 평균 CF 적용
         radiationSource,
         targetOrgan,
         rangeType,
@@ -158,20 +168,32 @@ export default function DataAnalysisPage() {
     }
   };
 
-  // Export CSV
-  const handleExport = async (id: number) => {
+  // Export CSV — type: summary | raw | smoothing
+  const handleExport = async (id: number, type: "summary" | "raw" | "smoothing" = "summary") => {
     try {
-      const response = await api.get(`/analysis/${id}/export`, { responseType: "blob" });
+      const response = await api.get(`/analysis/${id}/export`, {
+        params: { type },
+        responseType: "blob",
+      });
       const url = URL.createObjectURL(new Blob([response.data]));
       const a = document.createElement("a");
       a.href = url;
-      a.download = `analysis_${id}.csv`;
+      a.download = `analysis_${id}_${type}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch {
-      message.error("CSV 내보내기에 실패했습니다.");
+    } catch (err: any) {
+      message.error(err.response?.data?.error || "CSV 내보내기에 실패했습니다.");
     }
   };
+
+  const makeReportMenu = (id: number): MenuProps => ({
+    items: [
+      { key: "summary", icon: <FileTextOutlined />, label: "Summary (Dose Report)" },
+      { key: "raw", icon: <FileSearchOutlined />, label: "Raw Data" },
+      { key: "smoothing", icon: <FileExcelOutlined />, label: "Smoothing Data" },
+    ],
+    onClick: ({ key }) => handleExport(id, key as any),
+  });
 
   // Delete
   const handleDelete = async (id: number) => {
@@ -195,11 +217,12 @@ export default function DataAnalysisPage() {
       data: chartData.map((d: any) => dayjs(d.timestamp).format("HH:mm:ss")),
       axisLabel: { fontSize: 10, rotate: 30 },
     },
-    yAxis: { type: "value", name: "Voltage (V)", axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(4) } },
+    yAxis: { type: "value", name: "Voltage (mV)", axisLabel: { fontSize: 10, formatter: (v: number) => v.toFixed(3) } },
     series: [
-      { name: "Original", type: "line", data: chartData.map((d: any) => d.original), showSymbol: false, lineStyle: { color: "#4472C4", width: 1 } },
-      { name: "Baseline", type: "line", data: chartData.map(() => baseline), showSymbol: false, lineStyle: { color: "#FFC000", width: 1.5, type: "dashed" } },
-      { name: "Filtered", type: "line", data: chartData.map((d: any) => d.smoothed), showSymbol: false, lineStyle: { color: "#70AD47", width: 2 } },
+      { name: "Original", type: "line", data: chartData.map((d: any) => d.original * 1000), showSymbol: false, lineStyle: { color: "#4472C4", width: 1 } },
+      { name: "Baseline", type: "line", data: chartData.map(() => baseline * 1000), showSymbol: false, lineStyle: { color: "#FFC000", width: 1.5, type: "dashed" } },
+      // PDF 스펙: Filtered = 스무딩된 값 − baseline (초록 차트)
+      { name: "Filtered", type: "line", data: chartData.map((d: any) => d.smoothed * 1000 - baseline * 1000), showSymbol: false, lineStyle: { color: "#70AD47", width: 2 } },
     ],
     tooltip: { trigger: "axis" },
     dataZoom: [
@@ -237,9 +260,9 @@ export default function DataAnalysisPage() {
       render: (v: string) => toLabel(v),
     },
     {
-      title: "Cumulative (V·s)",
+      title: "Cumulative (mV·s)",
       dataIndex: "cumulativeDose",
-      render: (v: string) => Number(v).toFixed(2),
+      render: (v: string) => (Number(v) * 1000).toFixed(2),
     },
     {
       title: "Absorbed (Gy)",
@@ -260,10 +283,12 @@ export default function DataAnalysisPage() {
     },
     {
       title: "",
-      width: 80,
+      width: 110,
       render: (_: any, r: any) => (
         <Space size={4}>
-          <Button size="small" icon={<DownloadOutlined />} onClick={() => handleExport(r.id)} />
+          <Dropdown menu={makeReportMenu(r.id)} placement="bottomRight" trigger={["click"]}>
+            <Button size="small" icon={<DownloadOutlined />}>Report</Button>
+          </Dropdown>
           <Popconfirm title="삭제?" onConfirm={() => handleDelete(r.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -281,16 +306,18 @@ export default function DataAnalysisPage() {
             <Space>
               <span style={{ fontWeight: 600 }}>Calibration</span>
               <Select
-                style={{ width: 260 }}
-                placeholder="Calibration 선택 (CF Factor 필요)"
-                value={selectedCalibrationId}
-                onChange={setSelectedCalibrationId}
+                mode="multiple"
+                style={{ minWidth: 320, maxWidth: 520 }}
+                placeholder="Calibration 선택 (CF Factor 필요). 다중 선택 시 평균 CF 사용."
+                value={selectedCalibrationIds}
+                onChange={setSelectedCalibrationIds}
                 options={calibrations.map((c) => ({
-                  label: `${c.cfName || `CF#${c.id}`} — ${c.device?.deviceName} (CF: ${Number(c.cfFactor).toFixed(2)})`,
+                  label: `${c.cfName || `CF#${c.id}`} — ${c.device?.deviceName} (CF: ${(Number(c.cfFactor) * 1000).toFixed(2)} mV·s/cGy)`,
                   value: c.id,
                 }))}
                 showSearch
                 optionFilterProp="label"
+                maxTagCount="responsive"
               />
             </Space>
           </Col>
@@ -355,15 +382,21 @@ export default function DataAnalysisPage() {
               icon={<CalculatorOutlined />}
               onClick={handleCalculate}
               loading={calcLoading}
-              disabled={!selectedCalibrationId || !radiationSource || !targetOrgan}
+              disabled={selectedCalibrationIds.length === 0 || !radiationSource || !targetOrgan}
             >
               Calculate
             </Button>
           </Col>
           {selectedCalibration && (
             <Col>
-              <Space>
-                <Tag color="blue">CF: {Number(selectedCalibration.cfFactor).toFixed(2)}</Tag>
+              <Space wrap>
+                {selectedCalibrationIds.length > 1 ? (
+                  <Tag color="purple">
+                    Avg CF ({selectedCalibrationIds.length}개): {(avgCfFactor * 1000).toFixed(2)} mV·s/cGy
+                  </Tag>
+                ) : (
+                  <Tag color="blue">CF: {(Number(selectedCalibration.cfFactor) * 1000).toFixed(2)} mV·s/cGy</Tag>
+                )}
                 <Tag>{selectedCalibration.filterType}</Tag>
                 <Tag>W: {selectedCalibration.windowSize}</Tag>
               </Space>
@@ -392,13 +425,11 @@ export default function DataAnalysisPage() {
             style={{ height: "100%" }}
             extra={
               result && (
-                <Button
-                  size="small"
-                  icon={<DownloadOutlined />}
-                  onClick={() => handleExport(result.id)}
-                >
-                  CSV
-                </Button>
+                <Dropdown menu={makeReportMenu(result.id)} placement="bottomRight" trigger={["click"]}>
+                  <Button size="small" icon={<DownloadOutlined />}>
+                    Generate Report
+                  </Button>
+                </Dropdown>
               )
             }
           >
@@ -406,13 +437,13 @@ export default function DataAnalysisPage() {
               <Space direction="vertical" style={{ width: "100%" }} size={12}>
                 <Statistic
                   title="Cumulative Dose"
-                  value={result.cumulativeDose}
+                  value={result.cumulativeDose * 1000}
                   precision={2}
-                  suffix="V·s"
+                  suffix="mV·s"
                   valueStyle={{ color: "#4472C4", fontSize: 18 }}
                 />
                 <Statistic
-                  title={`Absorbed Dose (CF=${result.cfFactor.toFixed(2)})`}
+                  title={`Absorbed Dose (CF=${(result.cfFactor * 1000).toFixed(2)} mV·s/cGy)`}
                   value={result.absorbedDose}
                   precision={4}
                   suffix="Gy"

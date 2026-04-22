@@ -7,6 +7,7 @@ import CalibrationPage from "./pages/CalibrationPage";
 import ManageCalibrationPage from "./pages/ManageCalibrationPage";
 import DataAnalysisPage from "./pages/DataAnalysisPage";
 import UserSettingsPage from "./pages/UserSettingsPage";
+import ManageUsersPage from "./pages/ManageUsersPage";
 import OtaPage from "./pages/OtaPage";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="manage-calibration" element={<ManageCalibrationPage />} />
         <Route path="data-analysis" element={<DataAnalysisPage />} />
         <Route path="ota" element={<OtaPage />} />
+        <Route path="manage-users" element={<ManageUsersPage />} />
         <Route path="settings" element={<UserSettingsPage />} />
         <Route index element={<Navigate to="device" />} />
       </Route>
