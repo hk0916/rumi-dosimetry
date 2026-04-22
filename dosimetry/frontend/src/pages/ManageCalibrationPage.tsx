@@ -137,11 +137,16 @@ export default function ManageCalibrationPage() {
       const baselineV = Number(cal.baseline) || 0;
       const header = [
         `# CF Name: ${cal.cfName || `CF#${cal.id}`}`,
-        `# Device: ${cal.device?.deviceName || ""}`,
+        `# DeviceName: ${cal.device?.deviceName || ""}`,
+        `# DeviceMac: ${cal.device?.macAddress || ""}`,
+        `# DeviceId: ${cal.deviceId ?? ""}`,
+        `# GatewayMac: ${cal.gatewayMac || ""}`,
         `# Filter: ${cal.filterType || ""} (Window ${cal.windowSize ?? ""})`,
         `# Baseline: ${(baselineV * 1000).toFixed(6)} mV`,
         `# CF Factor: ${cal.cfFactor != null ? (Number(cal.cfFactor) * 1000).toFixed(6) + " mV·s/cGy" : "-"}`,
         `# Date: ${cal.date ? dayjs(cal.date).format("YYYY-MM-DD") : ""}`,
+        `# TimeRange: ${cal.startTime ? dayjs(cal.startTime).format("YYYY-MM-DD HH:mm:ss") : ""} ~ ${cal.endTime ? dayjs(cal.endTime).format("YYYY-MM-DD HH:mm:ss") : ""}`,
+        `# ExportedAt: ${dayjs().format("YYYY-MM-DD HH:mm:ss")}`,
         "",
         "Index,Timestamp,Raw,Voltage(mV),Voltage(V),Smoothed(mV),Filtered(mV)",
       ].join("\n");
@@ -167,8 +172,9 @@ export default function ManageCalibrationPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       const safeName = (cal.cfName || `CF_${cal.id}`).replace(/[^\w\-]+/g, "_");
+      const macShort = (cal.device?.macAddress || "").replace(/:/g, "");
       a.href = url;
-      a.download = `${safeName}_${dayjs().format("YYYYMMDD_HHmmss")}.csv`;
+      a.download = `${safeName}${macShort ? "_" + macShort : ""}_${dayjs().format("YYYYMMDD_HHmmss")}.csv`;
       a.click();
       URL.revokeObjectURL(url);
       message.success(`${rows.length}건 내보내기 완료`);

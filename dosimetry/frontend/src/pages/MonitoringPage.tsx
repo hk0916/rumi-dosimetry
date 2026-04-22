@@ -166,11 +166,28 @@ export default function MonitoringPage() {
       return;
     }
 
-    const deviceName = devices.find((d) => d.id === selectedDeviceId)?.deviceName || "unknown";
+    const device = devices.find((d) => d.id === selectedDeviceId);
+    const deviceName = device?.deviceName || "unknown";
+    const deviceMac = device?.macAddress || "";
     // raw(20-bit ADC, endian 변환 적용된 원본) = round(voltage(V) * 0xFFFFF / 1.21)
     const toRaw = (v: number) => Math.round((Number(v) * 0xFFFFF) / 1.21);
-    const csv = [
+    const mode = historyData.length > 0 ? "historical" : "realtime";
+    const firstTs = dataToExport[0]?.timestamp;
+    const lastTs = dataToExport[dataToExport.length - 1]?.timestamp;
+    const metaHeader = [
+      `# DeviceName: ${deviceName}`,
+      `# DeviceMac: ${deviceMac}`,
+      `# DeviceId: ${selectedDeviceId ?? ""}`,
+      `# Mode: ${mode}`,
+      `# Samples: ${dataToExport.length}`,
+      `# StartTime: ${firstTs ? dayjs(firstTs).format("YYYY-MM-DD HH:mm:ss.SSS") : ""}`,
+      `# EndTime: ${lastTs ? dayjs(lastTs).format("YYYY-MM-DD HH:mm:ss.SSS") : ""}`,
+      `# ExportedAt: ${dayjs().format("YYYY-MM-DD HH:mm:ss")}`,
+      "",
       "ID,Timestamp,Raw,Voltage(mV),Voltage(V)",
+    ].join("\n");
+    const csv = [
+      metaHeader,
       ...dataToExport.map((d) =>
         `${d.id},${dayjs(d.timestamp).format("YYYY-MM-DD HH:mm:ss.SSS")},${toRaw(d.voltage)},${Number(d.voltage) * 1000},${Number(d.voltage)}`
       ),
@@ -180,7 +197,10 @@ export default function MonitoringPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `dosimetry_${deviceName}_${dayjs().format("YYYYMMDD_HHmmss")}.csv`;
+    // 파일명: dosimetry_<DeviceName>_<MAC약식>_<시각>.csv (MAC은 콜론 제거)
+    const macShort = deviceMac.replace(/:/g, "");
+    const safeName = deviceName.replace(/[^\w\-]+/g, "_");
+    a.download = `dosimetry_${safeName}${macShort ? "_" + macShort : ""}_${dayjs().format("YYYYMMDD_HHmmss")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     message.success("CSV 파일이 다운로드되었습니다.");

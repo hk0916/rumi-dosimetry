@@ -170,6 +170,30 @@ export default function CalibrationPage() {
         const headerIdx = rawLines.findIndex((l) => !l.trim().startsWith("#"));
         if (headerIdx < 0) { message.error("CSV 헤더를 찾을 수 없습니다."); return; }
 
+        // 메타 헤더(#) 에서 Device 정보 추출 → 자동 디바이스 선택
+        const metaLines = rawLines.slice(0, headerIdx);
+        const getMeta = (key: string): string | null => {
+          const re = new RegExp(`^#\\s*${key}\\s*:\\s*(.+?)\\s*$`, "i");
+          for (const l of metaLines) {
+            const m = l.match(re);
+            if (m) return m[1];
+          }
+          return null;
+        };
+        const metaMac = getMeta("DeviceMac");
+        const metaDeviceId = getMeta("DeviceId");
+        const metaDeviceName = getMeta("DeviceName") || getMeta("Device");
+        let matchedDevice: any = null;
+        if (metaMac) matchedDevice = devices.find((d) => (d.macAddress || "").toLowerCase() === metaMac.toLowerCase());
+        if (!matchedDevice && metaDeviceId) matchedDevice = devices.find((d) => String(d.id) === String(metaDeviceId));
+        if (!matchedDevice && metaDeviceName) matchedDevice = devices.find((d) => d.deviceName === metaDeviceName);
+        if (matchedDevice) {
+          setSelectedDeviceId(matchedDevice.id);
+          console.log(`[CSV Import] auto-selected device: ${matchedDevice.deviceName} (${matchedDevice.macAddress})`);
+        } else if (metaMac || metaDeviceId || metaDeviceName) {
+          console.warn(`[CSV Import] CSV에 기록된 Device(${metaDeviceName || metaMac || metaDeviceId})를 찾을 수 없습니다.`);
+        }
+
         const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, "");
         const headers = rawLines[headerIdx].split(",").map(normalize);
 
@@ -236,7 +260,8 @@ export default function CalibrationPage() {
           setRangeStart(firstTs);
           setRangeEnd(lastTs);
 
-          message.success(`${data.totalPoints}건 로드 완료. 누적선량: ${(data.cumulativeDose * 1000).toFixed(6)} mV·s`);
+          const deviceNote = matchedDevice ? ` [Device: ${matchedDevice.deviceName}]` : "";
+          message.success(`${data.totalPoints}건 로드 완료${deviceNote}. 누적선량: ${(data.cumulativeDose * 1000).toFixed(6)} mV·s`);
         } catch (err: any) {
           message.error(err.response?.data?.error || "CSV 계산 요청에 실패했습니다.");
         } finally {
@@ -249,7 +274,7 @@ export default function CalibrationPage() {
     };
     reader.onerror = () => message.error("파일을 읽을 수 없습니다.");
     reader.readAsText(file, "utf-8");
-  }, [filterType, windowSize, baseline]);
+  }, [filterType, windowSize, baseline, devices]);
 
   // 필터 재적용 (DB 모드 전용 — CSV 모드에서는 다시 Upload CSV 필요)
   const handleApplyFilter = useCallback(async () => {
