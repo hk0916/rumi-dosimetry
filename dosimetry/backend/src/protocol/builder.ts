@@ -35,12 +35,6 @@ export function buildSetOtaServerUrl(url: string): Buffer {
   return buildPacket(CMD.SET_OTA_SERVER_URL, DIR.REQUEST, urlBuf);
 }
 
-// ============ 0x03: Set OTA File Name Request ============
-export function buildSetOtaFileName(fileName: string): Buffer {
-  const nameBuf = Buffer.from(fileName, "utf8");
-  return buildPacket(CMD.SET_OTA_FILE_NAME, DIR.REQUEST, nameBuf);
-}
-
 // ============ 0x04: Set WebSocket Server URL Request ============
 export function buildSetWsServerUrl(url: string): Buffer {
   const urlBuf = Buffer.from(url, "utf8");

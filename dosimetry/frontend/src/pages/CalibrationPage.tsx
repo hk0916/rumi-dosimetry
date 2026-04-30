@@ -1,14 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Card, Select, DatePicker, TimePicker, Button, InputNumber,
-  Space, Row, Col, Divider, Statistic, message, Input, Descriptions, Tag,
+  Space, Row, Col, Divider, Statistic, message, Input, Descriptions, Tag, Upload,
 } from "antd";
 import {
   SearchOutlined, SaveOutlined, CalculatorOutlined,
-  FilterOutlined, ReloadOutlined,
+  FilterOutlined, ReloadOutlined, UploadOutlined,
 } from "@ant-design/icons";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
+import * as XLSX from "xlsx";
 import api from "../services/api";
 import dayjs from "dayjs";
 
@@ -59,6 +60,12 @@ export default function CalibrationPage() {
   const [cfName, setCfName] = useState("");
   const [saveLoading, setSaveLoading] = useState(false);
 
+  // 업로드된 XLSX 의 디바이스별 데이터. uploadMode=true 면 device select / 차트 / 계산이 이 안에서만 동작.
+  // Import Data (DB) 누르면 해제되어 전체 devices 목록으로 돌아간다.
+  type UploadedDevice = { deviceId: number; deviceName: string; macAddress: string; timestamps: number[]; voltages: number[] };
+  const [uploadedDevices, setUploadedDevices] = useState<UploadedDevice[]>([]);
+  const uploadMode = uploadedDevices.length > 0;
+
   useEffect(() => {
     api.get("/devices").then(({ data }) => setDevices(data.data)).catch(() => {});
   }, []);
@@ -69,6 +76,9 @@ export default function CalibrationPage() {
       message.warning("디바이스, 날짜, 시작/종료 시간을 모두 입력하세요.");
       return;
     }
+
+    // DB 조회로 다시 들어가니 업로드 모드 해제 — device select 가 전체 목록으로 돌아간다.
+    setUploadedDevices([]);
 
     const dateStr = date.format("YYYY-MM-DD");
     const start = `${dateStr}T${startTime.format("HH:mm:ss")}`;
@@ -104,14 +114,182 @@ export default function CalibrationPage() {
     }
   }, [selectedDeviceId, date, startTime, endTime, filterType, windowSize, baseline]);
 
-  // 필터 재적용
+  // 업로드된 디바이스의 timestamps/voltages 로 backend 재계산 — uploadMode 에서 디바이스 변경 / Apply Filter 시 호출
+  const recomputeForUpload = useCallback(async (target: UploadedDevice) => {
+    setLoading(true);
+    setCumulativeDose(null);
+    setCfFactor(null);
+    try {
+      const { data: resp } = await api.post("/calibrations/calculate-from-csv", {
+        timestamps: target.timestamps,
+        voltages: target.voltages,
+        filterType,
+        windowSize,
+        baseline,
+      });
+      setChartData(resp.chartData);
+      setTotalPoints(resp.totalPoints);
+      setCumulativeDose(resp.cumulativeDose);
+      const firstTs = dayjs(resp.startTime);
+      const lastTs = dayjs(resp.endTime);
+      setDate(firstTs);
+      setStartTime(firstTs);
+      setEndTime(lastTs);
+      setRangeStartTime(firstTs);
+      setRangeEndTime(lastTs);
+      message.success(`${resp.totalPoints}건 로드 [${target.deviceName}]. 누적선량: ${resp.cumulativeDose} V·s`);
+    } catch (err: any) {
+      message.error(err.response?.data?.error || "계산 요청에 실패했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterType, windowSize, baseline]);
+
+  // XLSX 업로드 — 모든 시트 파싱해서 디바이스별 데이터를 메모리에 보관.
+  // Device select 가 이 디바이스들로 제한되고, 디바이스 선택을 바꾸면 해당 시트 데이터로 재계산된다.
+  // 형식: 시트 1개 = 디바이스 1개. 헤더: # 메타 (DeviceMac/DeviceId/DeviceName) + 빈 줄 + 컬럼 헤더(Timestamp/Raw/Voltage(mV)/Voltage(V)).
+  // Raw 컬럼 우선 (DB 모드와 단위 일관).
+  const handleImportXLSX = useCallback(async (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+        if (workbook.SheetNames.length === 0) {
+          message.error("XLSX 파일에 시트가 없습니다.");
+          return;
+        }
+
+        const parsed: UploadedDevice[] = [];
+        const skippedSheets: string[] = [];
+
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+          if (rows.length < 2) { skippedSheets.push(`${sheetName}: 빈 시트`); continue; }
+
+          const metaLines: string[] = [];
+          let headerRowIdx = -1;
+          for (let i = 0; i < rows.length; i++) {
+            const cell0 = String(rows[i]?.[0] ?? "").trim();
+            if (cell0.startsWith("#")) { metaLines.push(cell0); continue; }
+            if (cell0 === "") continue;
+            headerRowIdx = i;
+            break;
+          }
+          if (headerRowIdx < 0) { skippedSheets.push(`${sheetName}: 헤더 없음`); continue; }
+
+          const getMeta = (key: string): string | null => {
+            const re = new RegExp(`^#\\s*${key}\\s*:\\s*(.+?)\\s*$`, "i");
+            for (const l of metaLines) {
+              const m = l.match(re);
+              if (m) return m[1];
+            }
+            return null;
+          };
+          const metaMac = getMeta("DeviceMac");
+          const metaDeviceId = getMeta("DeviceId");
+          const metaDeviceName = getMeta("DeviceName") || getMeta("Device");
+          let matchedDevice: any = null;
+          if (metaMac) matchedDevice = devices.find((d) => (d.macAddress || "").toLowerCase() === metaMac.toLowerCase());
+          if (!matchedDevice && metaDeviceId) matchedDevice = devices.find((d) => String(d.id) === String(metaDeviceId));
+          if (!matchedDevice && metaDeviceName) matchedDevice = devices.find((d) => d.deviceName === metaDeviceName);
+          if (!matchedDevice) {
+            skippedSheets.push(`${sheetName}: 매칭되는 디바이스 없음 (${metaDeviceName || metaMac || "메타 없음"})`);
+            continue;
+          }
+
+          const normalize = (s: any) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, "");
+          const headers = (rows[headerRowIdx] as any[]).map(normalize);
+          const tsIdx = headers.findIndex((h) => h === "timestamp" || h === "time");
+          let voltIdx = headers.findIndex((h) => h === "raw");
+          let voltScale = 1;
+          if (voltIdx < 0) {
+            voltIdx = headers.findIndex((h) => h === "voltage(mv)");
+            if (voltIdx >= 0) voltScale = 1;
+          }
+          if (voltIdx < 0) {
+            voltIdx = headers.findIndex((h) => h === "voltage(v)");
+            if (voltIdx >= 0) voltScale = 1000;
+          }
+          if (tsIdx < 0 || voltIdx < 0) {
+            skippedSheets.push(`${sheetName}: 헤더에 Timestamp 또는 Raw/Voltage 컬럼 없음`);
+            continue;
+          }
+
+          const timestamps: number[] = [];
+          const voltages: number[] = [];
+          for (let i = headerRowIdx + 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.length <= Math.max(tsIdx, voltIdx)) continue;
+            const tsRaw = row[tsIdx];
+            let tsMs: number;
+            if (tsRaw instanceof Date) tsMs = tsRaw.getTime();
+            else {
+              const d = dayjs(String(tsRaw).trim());
+              tsMs = d.isValid() ? d.valueOf() : NaN;
+            }
+            const voltRaw = Number(row[voltIdx]);
+            if (!isFinite(tsMs) || !isFinite(voltRaw)) continue;
+            timestamps.push(tsMs);
+            voltages.push(voltRaw * voltScale);
+          }
+
+          if (voltages.length < 2) {
+            skippedSheets.push(`${sheetName}: 유효 샘플 부족 (${voltages.length})`);
+            continue;
+          }
+
+          parsed.push({
+            deviceId: matchedDevice.id,
+            deviceName: matchedDevice.deviceName,
+            macAddress: matchedDevice.macAddress,
+            timestamps,
+            voltages,
+          });
+        }
+
+        if (parsed.length === 0) {
+          message.error(`불러올 디바이스가 없습니다. ${skippedSheets.join(" / ")}`);
+          return;
+        }
+
+        setUploadedDevices(parsed);
+        setSelectedDeviceId(parsed[0].deviceId);
+        // recomputeForUpload 는 selectedDeviceId 변경 effect 에서 자동 호출됨
+
+        const skipNote = skippedSheets.length > 0 ? ` (스킵: ${skippedSheets.length})` : "";
+        message.success(`${parsed.length}개 디바이스 로드: ${parsed.map((d) => d.deviceName).join(", ")}${skipNote}`);
+      } catch (err) {
+        console.error("[XLSX Import] parse error", err);
+        message.error("XLSX 파싱 중 오류가 발생했습니다.");
+      }
+    };
+    reader.onerror = () => message.error("파일을 읽을 수 없습니다.");
+    reader.readAsArrayBuffer(file);
+  }, [devices]);
+
+  // uploadMode 에서 디바이스 선택을 바꾸면 해당 디바이스의 시트 데이터로 자동 재계산
+  useEffect(() => {
+    if (!uploadMode || !selectedDeviceId) return;
+    const target = uploadedDevices.find((d) => d.deviceId === selectedDeviceId);
+    if (target) recomputeForUpload(target);
+  }, [selectedDeviceId, uploadMode, uploadedDevices, recomputeForUpload]);
+
+  // 필터 재적용 — uploadMode 면 업로드 데이터에 재적용, 아니면 DB 모드
   const handleApplyFilter = useCallback(async () => {
+    if (uploadMode) {
+      const target = uploadedDevices.find((d) => d.deviceId === selectedDeviceId);
+      if (!target) { message.warning("디바이스를 선택하세요."); return; }
+      await recomputeForUpload(target);
+      return;
+    }
     if (!selectedDeviceId || !date || !startTime || !endTime) {
       message.warning("먼저 데이터를 불러오세요.");
       return;
     }
     await handleImportData();
-  }, [handleImportData]);
+  }, [uploadMode, uploadedDevices, selectedDeviceId, recomputeForUpload, handleImportData, date, startTime, endTime]);
 
   // 범위 지정 누적선량 재계산
   const handleCalculateRange = useCallback(async () => {
@@ -272,12 +450,19 @@ export default function CalibrationPage() {
             <Space>
               <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Device</span>
               <Select
-                style={{ width: 180 }}
-                placeholder="디바이스 선택"
+                style={{ width: 220 }}
+                placeholder={uploadMode ? "업로드된 디바이스" : "디바이스 선택"}
                 value={selectedDeviceId}
                 onChange={setSelectedDeviceId}
-                options={devices.map((d) => ({ label: d.deviceName, value: d.id }))}
+                options={
+                  uploadMode
+                    ? uploadedDevices.map((d) => ({ label: `${d.deviceName} (${d.voltages.length})`, value: d.deviceId }))
+                    : devices.map((d) => ({ label: d.deviceName, value: d.id }))
+                }
               />
+              {uploadMode && (
+                <Tag color="purple">XLSX {uploadedDevices.length}개</Tag>
+              )}
             </Space>
           </Col>
           <Col>
@@ -295,14 +480,23 @@ export default function CalibrationPage() {
             </Space>
           </Col>
           <Col>
-            <Button
-              type="primary"
-              icon={<SearchOutlined />}
-              onClick={handleImportData}
-              loading={loading}
-            >
-              Import Data
-            </Button>
+            <Space>
+              <Button
+                type="primary"
+                icon={<SearchOutlined />}
+                onClick={handleImportData}
+                loading={loading}
+              >
+                Import Data
+              </Button>
+              <Upload
+                accept=".xlsx,.xlsm"
+                showUploadList={false}
+                beforeUpload={(file) => { handleImportXLSX(file); return false; }}
+              >
+                <Button icon={<UploadOutlined />}>Upload XLSX</Button>
+              </Upload>
+            </Space>
           </Col>
         </Row>
 

@@ -18,7 +18,6 @@ export interface GwInfoResponse {
   hwVersion: string;        // 7 bytes -> "0.0.0.1"
   fwVersion: string;        // 7 bytes -> "0.0.0.1"
   otaServerUrl: string;
-  otaFileName: string;
   wsServerUrl: string;
   reportInterval: number;   // 4 bytes, Big Endian (seconds)
   rssiFilter: number;       // 1 byte, signed
@@ -30,7 +29,6 @@ export interface GwInfoIndication {
   hwVersion: string;
   fwVersion: string;
   otaServerUrl: string;
-  otaFileName: string;
   wsServerUrl: string;
   reportInterval: number;
   rssiFilter: number;
@@ -106,6 +104,24 @@ export function parsePacket(buf: Buffer): ProtocolPacket | null {
 }
 
 /**
+ * 0x08 Indication / 0x01 Response 의 실제 필드 길이를 계산.
+ * 필드: [returnValue(1)?] + mac(6) + hw(7) + fw(7) + otaLen(1)+ota + wsLen(1)+ws + interval(4) + rssi(1)
+ * 계산 불가 시 -1 반환.
+ */
+function computeGwInfoActualSize(data: Buffer, hasReturnValue: boolean): number {
+  let offset = hasReturnValue ? 21 : 20; // returnValue(1)? + mac(6) + hw(7) + fw(7)
+  if (offset + 1 > data.length) return -1;
+  const otaLen = data.readUInt8(offset);
+  offset += 1 + otaLen;
+  if (offset + 1 > data.length) return -1;
+  const wsLen = data.readUInt8(offset);
+  offset += 1 + wsLen;
+  offset += 4 + 1; // reportInterval + rssiFilter
+  if (offset > data.length) return -1;
+  return offset;
+}
+
+/**
  * 현재 위치가 유효한 패킷 헤더인지 검증
  */
 function isValidHeader(buf: Buffer, offset: number): boolean {
@@ -163,12 +179,28 @@ export function extractPackets(buf: Buffer): { packets: ProtocolPacket[]; remain
     if (remaining.length < HEADER_SIZE) break;
 
     const length = remaining.readUInt16BE(2);
-    const totalSize = HEADER_SIZE + length;
+    let totalSize = HEADER_SIZE + length;
 
     if (remaining.length < totalSize) break;
 
+    // 펌웨어 워크어라운드: 0x08 Indication / 0x01 Response 의 LEN 이 실제
+    // 필드 구조보다 4 bytes 큰 경우가 관측됨 (다음 패킷 헤더를 데이터로 잠식).
+    // 필드 길이를 계산해 actualSize 가 LEN 보다 작으면 그 만큼만 소비.
+    const isGwInfo =
+      (dataType === CMD.GW_INFO_INDICATION && direction === DIR.INDICATION) ||
+      (dataType === CMD.GET_GW_INFO && direction === DIR.RESPONSE);
+    if (isGwInfo) {
+      const actualDataSize = computeGwInfoActualSize(
+        remaining.subarray(HEADER_SIZE, HEADER_SIZE + length),
+        dataType === CMD.GET_GW_INFO,
+      );
+      if (actualDataSize > 0 && actualDataSize < length) {
+        totalSize = HEADER_SIZE + actualDataSize;
+      }
+    }
+
     const data = Buffer.from(remaining.subarray(HEADER_SIZE, totalSize));
-    packets.push({ dataType, direction, length, data });
+    packets.push({ dataType, direction, length: totalSize - HEADER_SIZE, data });
     offset += totalSize;
   }
 
@@ -208,10 +240,9 @@ export function parseGwInfoResponse(data: Buffer): GwInfoResponse {
   const fwVersion = parseVersion(data, offset); offset += 7;
 
   const otaUrlResult = parseVarString(data, offset); offset = otaUrlResult.nextOffset;
-  const otaFileResult = parseVarString(data, offset); offset = otaFileResult.nextOffset;
   const wsUrlResult = parseVarString(data, offset); offset = wsUrlResult.nextOffset;
 
-  const reportInterval = data.readUInt32BE(offset); offset += 4;
+  const reportInterval = data.readUInt32LE(offset); offset += 4;
   const rssiFilter = data.readInt8(offset);
 
   return {
@@ -220,7 +251,6 @@ export function parseGwInfoResponse(data: Buffer): GwInfoResponse {
     hwVersion,
     fwVersion,
     otaServerUrl: otaUrlResult.value,
-    otaFileName: otaFileResult.value,
     wsServerUrl: wsUrlResult.value,
     reportInterval,
     rssiFilter,
@@ -236,10 +266,9 @@ export function parseGwInfoIndication(data: Buffer): GwInfoIndication {
   const fwVersion = parseVersion(data, offset); offset += 7;
 
   const otaUrlResult = parseVarString(data, offset); offset = otaUrlResult.nextOffset;
-  const otaFileResult = parseVarString(data, offset); offset = otaFileResult.nextOffset;
   const wsUrlResult = parseVarString(data, offset); offset = wsUrlResult.nextOffset;
 
-  const reportInterval = data.readUInt32BE(offset); offset += 4;
+  const reportInterval = data.readUInt32LE(offset); offset += 4;
   const rssiFilter = data.readInt8(offset);
 
   return {
@@ -247,7 +276,6 @@ export function parseGwInfoIndication(data: Buffer): GwInfoIndication {
     hwVersion,
     fwVersion,
     otaServerUrl: otaUrlResult.value,
-    otaFileName: otaFileResult.value,
     wsServerUrl: wsUrlResult.value,
     reportInterval,
     rssiFilter,
@@ -259,7 +287,7 @@ export function parseTagDataIndication(data: Buffer): TagDataIndication {
   let offset = 0;
 
   const btMacAddr = parseMac(data, offset); offset += 6;
-  const scanTick = data.readUInt32BE(offset); offset += 4;
+  const scanTick = data.readUInt32LE(offset); offset += 4;
   const rssi = data.readInt8(offset); offset += 1;
 
   // Tag Beacon Data: 31 bytes

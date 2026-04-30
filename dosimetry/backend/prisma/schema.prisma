@@ -90,7 +90,6 @@ model Gateway {
   deviceFwVersion  String?       @map("device_fw_version") @db.VarChar(50)
   bleFwVersion     String?       @map("ble_fw_version") @db.VarChar(50)
   otaServerUrl     String?       @map("ota_server_url") @db.VarChar(255)
-  otaFileName      String?       @map("ota_file_name") @db.VarChar(255)
   wsServerUrl      String?       @map("ws_server_url") @db.VarChar(255)
   reportInterval   Int?          @map("report_interval") // seconds
   uptime           DateTime?

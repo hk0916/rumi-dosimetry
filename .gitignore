@@ -4,6 +4,7 @@ dist/
 *.log
 .DS_Store
 dosimetry/mysql_data/
+dosimetry/docker-compose.override.yml
 dosimetry/backend/node_modules/
 dosimetry/frontend/node_modules/
 __pycache__/

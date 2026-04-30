@@ -142,6 +142,66 @@ export async function calibrationRoutes(app: FastifyInstance) {
     };
   });
 
+  // POST /api/calibrations/calculate-from-csv — 외부 데이터(timestamps + voltages)로 스무딩/누적선량 계산.
+  // 모니터링/캘리브레이션 페이지에서 export 한 XLSX 를 다시 불러와서 분석할 때 사용.
+  // 단위 정책은 /calculate 와 동일 — voltages 는 raw, baseline 은 mV 가 섞이는 현재 정책 유지.
+  app.post("/calculate-from-csv", async (request, reply) => {
+    const body = request.body as {
+      timestamps: number[];
+      voltages: number[];
+      filterType?: FilterType;
+      windowSize?: number;
+      baseline?: number;
+    };
+
+    if (!Array.isArray(body.timestamps) || !Array.isArray(body.voltages)) {
+      return reply.status(400).send({ error: "timestamps와 voltages 배열이 필요합니다." });
+    }
+    if (body.timestamps.length !== body.voltages.length) {
+      return reply.status(400).send({ error: "timestamps와 voltages 길이가 일치해야 합니다." });
+    }
+    if (body.voltages.length < 2) {
+      return reply.status(400).send({ error: "최소 2개 이상의 샘플이 필요합니다." });
+    }
+
+    const filterType = body.filterType || "median";
+    const windowSize = body.windowSize || 10;
+    const baseline = body.baseline ?? 0;
+
+    const smoothedVoltages = applyFilter(body.voltages, filterType, windowSize);
+    const cumulativeDose = calculateCumulativeDose(body.timestamps, smoothedVoltages, baseline);
+
+    const maxPoints = 2000;
+    const step = Math.max(1, Math.floor(body.voltages.length / maxPoints));
+    const chartData: Array<{ timestamp: Date; original: number; smoothed: number }> = [];
+    for (let i = 0; i < body.voltages.length; i += step) {
+      chartData.push({
+        timestamp: new Date(body.timestamps[i]),
+        original: body.voltages[i],
+        smoothed: smoothedVoltages[i],
+      });
+    }
+    const lastIdx = body.voltages.length - 1;
+    if (chartData.length === 0 || chartData[chartData.length - 1].timestamp.getTime() !== body.timestamps[lastIdx]) {
+      chartData.push({
+        timestamp: new Date(body.timestamps[lastIdx]),
+        original: body.voltages[lastIdx],
+        smoothed: smoothedVoltages[lastIdx],
+      });
+    }
+
+    return {
+      totalPoints: body.voltages.length,
+      filterType,
+      windowSize,
+      baseline,
+      cumulativeDose: Math.round(cumulativeDose * 100) / 100,
+      chartData,
+      startTime: new Date(body.timestamps[0]).toISOString(),
+      endTime: new Date(body.timestamps[lastIdx]).toISOString(),
+    };
+  });
+
   // POST /api/calibrations — CF Factor 저장
   app.post("/", async (request, reply) => {
     const body = request.body as any;

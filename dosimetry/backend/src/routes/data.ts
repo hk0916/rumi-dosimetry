@@ -116,13 +116,14 @@ export async function dataRoutes(app: FastifyInstance) {
     const data = await prisma.sensorData.findMany({
       where,
       orderBy: { timestamp: "asc" },
-      take: 50000,
+      take: 200000, // 디바이스당 최대 ≈ 40Hz × 5,000초 ≈ 83분 (40분 목표 + 여유)
     });
 
     return {
       data: data.map((d) => ({
         id: d.id.toString(),
         voltage: d.voltage,
+        advertisingCount: d.advertisingCount,
         timestamp: d.timestamp,
       })),
       total: data.length,

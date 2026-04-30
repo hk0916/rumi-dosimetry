@@ -22,7 +22,6 @@ import {
   buildGwInfoIndicationResponse,
   buildTagDataResponse,
   buildSetOtaServerUrl,
-  buildSetOtaFileName,
   buildSetWsServerUrl,
   buildSetReportInterval,
   buildSetRssiFilter,
@@ -37,6 +36,35 @@ const gatewayConnections = new Map<string, any>();
 const socketToMac = new Map<any, string>();
 // 소켓별 수신 버퍼 (바이너리 스트림 누적)
 const socketBuffers = new Map<any, Buffer>();
+// Dose 데이터 timestamp 안정화용 advCount anchor (deviceId → 첫 advCount + 그 시점 서버시각 + 마지막 본 advCount)
+// 이게 있어야 패킷 도착 시각의 지터가 timestamp 에 반영되지 않아서 차트가 안정적으로 그려진다.
+const advAnchors = new Map<number, { firstAdv: number; anchorTime: number; lastAdv: number }>();
+const SAMPLE_INTERVAL_MS = 25;
+
+// 글로벌 anchor 시각 — 모든 디바이스가 공통 base 로 사용해서 timestamp 가 디바이스간 정렬되도록 한다.
+// 이전엔 디바이스별로 첫 0x0B 도착 시각 기준 anchorTime 을 따로 잡아서, 게이트웨이가 5개 디바이스를
+// 25ms 단위로 forwarding 하는 구조에서 디바이스간 anchor 시각이 25ms 씩 어긋났다 (사용자 시각으로
+// "1개만 빠른 느낌"). globalAnchorTime 한 번만 잡고 전 디바이스가 공유하면 같은 advCount 진행 위치는
+// 같은 timestamp 로 매핑됨.
+let globalAnchorTime: number | null = null;
+
+// MAC → device row 캐싱 (매 0x0B 마다 findUnique 안 하도록).
+// 정상 등록 MAC 만 영구 캐시. 미등록 MAC 은 unknownMacExpiry 에서 TTL 로 관리해서
+// (1) 같은 미등록 MAC 이 매 패킷마다 DB 두드리지 않게 (DDoS 보호)
+// (2) 늦게 등록된 디바이스도 TTL 만료 후 재조회되어 자동 인식
+// 이렇게 분리한 이유: 이전 구현은 null 도 같은 Map 에 캐시해 stuck 되는 startup race 가 있었음.
+const deviceByMac = new Map<string, { id: number }>();
+const unknownMacExpiry = new Map<string, number>();
+// 짧게 잡은 이유: startup pool warmup race 등 일시적 매칭 실패 시 빠른 회복이 필요.
+// DDoS 보호는 한 MAC 당 30초당 findUnique 1회 = 0.03 qps 로 충분.
+const NEGATIVE_TTL_MS = 30 * 1000;
+
+// 같은 socket 의 message handler 들을 promise chain 으로 직렬화 — async handler 가 await 사이에
+// 다음 메시지를 인터리브 처리하던 race 를 차단. 인터리브 시 advCount 가 backend 처리 순서로 거꾸로 보여
+// anchor.lastAdv 가 새 anchor 잡고 timestamp 가 역행하는 사선 artifact 의 근본 원인이었음.
+const socketTasks = new WeakMap<object, Promise<void>>();
+// 디바이스별 update 카운터 — 5 packet 마다만 device.update 실행 (createMany 가 데이터 저장 책임이고 update 는 status/last 메타용)
+const updateCounterByDeviceId = new Map<number, number>();
 
 export { gatewayConnections };
 
@@ -49,29 +77,12 @@ export function createGatewaySocketHandler(app: FastifyInstance) {
     socket.send(infoReq);
     app.log.info(`-> 0x01 Get GW Info Request 전송`);
 
-    socket.on("message", async (rawData: Buffer | ArrayBuffer | Buffer[]) => {
-      try {
-        let incoming: Buffer;
-        if (Buffer.isBuffer(rawData)) {
-          incoming = rawData;
-        } else if (rawData instanceof ArrayBuffer) {
-          incoming = Buffer.from(rawData);
-        } else {
-          incoming = Buffer.concat(rawData);
-        }
-        const prevBuf = socketBuffers.get(socket) || Buffer.alloc(0);
-        const combined = Buffer.concat([prevBuf, incoming]);
-        const { packets, remaining, skipped } = extractPackets(combined);
-        if (skipped > 0) {
-          app.log.warn(`패킷 resync: ${skipped} bytes 스킵됨`);
-        }
-        socketBuffers.set(socket, remaining);
-        for (const packet of packets) {
-          await handlePacket(app, socket, packet);
-        }
-      } catch (err) {
-        app.log.error(`패킷 처리 오류: ${err}`);
-      }
+    socket.on("message", (rawData: Buffer | ArrayBuffer | Buffer[]) => {
+      const prev = socketTasks.get(socket) || Promise.resolve();
+      const next = prev.then(() => processMessage(app, socket, rawData)).catch((err) => {
+        app.log.error(`수신 처리 오류: ${err}`);
+      });
+      socketTasks.set(socket, next);
     });
 
     socket.on("close", () => {
@@ -92,18 +103,30 @@ export function createGatewaySocketHandler(app: FastifyInstance) {
       app.log.error(`Gateway WS 오류: ${err.message}`);
     });
 
-    const pingInterval = setInterval(() => {
-      if (socket.readyState === 1) {
-        socket.ping();
-      } else {
-        clearInterval(pingInterval);
-      }
-    }, 30000);
-    socket.on("close", () => clearInterval(pingInterval));
+    // Application-level WebSocket ping/pong 은 게이트웨이 펌웨어 로그에 EVENT_DATA(opcode=9/10, len=0)로
+    // 잡혀서 노이즈가 되므로 보내지 않음. 연결 헬스체크는 TCP keep-alive 로 위임.
   };
 }
 
 export async function gatewayWsRoutes(app: FastifyInstance) {
+  // Device offline monitor — uptime (마지막 0x0B 시각) 이 OFFLINE_TIMEOUT_MS 보다 오래된 online 디바이스를 offline 으로 마크.
+  // online 으로 다시 전환은 0x0B 첫 패킷의 device.update 가 즉시 처리한다 (handleDoseDataIndication).
+  const OFFLINE_TIMEOUT_MS = 10 * 1000;
+  const OFFLINE_CHECK_INTERVAL_MS = 3 * 1000;
+  const offlineMonitor = setInterval(async () => {
+    try {
+      const cutoff = new Date(Date.now() - OFFLINE_TIMEOUT_MS);
+      const result = await prisma.device.updateMany({
+        where: { status: "online", uptime: { lt: cutoff } },
+        data: { status: "offline" },
+      });
+      if (result.count > 0) app.log.info(`[offline-monitor] ${result.count} devices → offline`);
+    } catch (err) {
+      app.log.error(`[offline-monitor] ${err}`);
+    }
+  }, OFFLINE_CHECK_INTERVAL_MS);
+  app.addHook("onClose", async () => { clearInterval(offlineMonitor); });
+
   // ============ REST API: Gateway에 커맨드 전송 ============
   app.addHook("onRequest", (app as any).authenticate);
 
@@ -125,17 +148,6 @@ export async function gatewayWsRoutes(app: FastifyInstance) {
     if (!ws) return reply.status(404).send({ error: "Gateway가 연결되어 있지 않습니다.", mac });
     ws.send(buildSetOtaServerUrl(url));
     return { sent: true, command: "0x02 Set OTA Server URL", url };
-  });
-
-  // POST /ws/gw-cmd/ota-filename/:mac — 0x03 Set OTA File Name
-  app.post("/gw-cmd/ota-filename/:mac", async (request, reply) => {
-    const { mac } = request.params as { mac: string };
-    const { fileName } = request.body as { fileName: string };
-    if (!fileName) return reply.status(400).send({ error: "fileName은 필수입니다." });
-    const ws = gatewayConnections.get(mac);
-    if (!ws) return reply.status(404).send({ error: "Gateway가 연결되어 있지 않습니다.", mac });
-    ws.send(buildSetOtaFileName(fileName));
-    return { sent: true, command: "0x03 Set OTA File Name", fileName };
   });
 
   // POST /ws/gw-cmd/ws-url/:mac — 0x04 Set WS Server URL
@@ -201,6 +213,34 @@ export async function gatewayWsRoutes(app: FastifyInstance) {
   });
 }
 
+/** 한 socket 의 message 1건을 처리. promise chain 으로 직렬 호출되므로 같은 socket 에서는 동시 실행되지 않는다. */
+async function processMessage(app: FastifyInstance, socket: any, rawData: Buffer | ArrayBuffer | Buffer[]) {
+  let incoming: Buffer;
+  if (Buffer.isBuffer(rawData)) {
+    incoming = rawData;
+  } else if (rawData instanceof ArrayBuffer) {
+    incoming = Buffer.from(rawData);
+  } else {
+    incoming = Buffer.concat(rawData);
+  }
+  const prevBuf = socketBuffers.get(socket) || Buffer.alloc(0);
+  const combined = Buffer.concat([prevBuf, incoming]);
+  const { packets, remaining, skipped } = extractPackets(combined);
+  if (skipped > 0) {
+    app.log.warn(`패킷 resync: ${skipped} bytes 스킵됨`);
+  }
+  socketBuffers.set(socket, remaining);
+  for (const packet of packets) {
+    // 한 패킷의 처리 실패가 같은 배치의 나머지 패킷 (특히 뒤따르는 0x0B Dose Data)
+    // 을 잠식하지 않도록 격리. 이전엔 0x08 처리 실패 시 같은 WS 메시지의 0x0B 가 통째로 버려졌음.
+    try {
+      await handlePacket(app, socket, packet);
+    } catch (perPacketErr) {
+      app.log.error(`패킷 처리 오류 (CMD=0x${packet.dataType.toString(16).padStart(2, "0")}, DIR=0x${packet.direction.toString(16).padStart(2, "0")}): ${perPacketErr}`);
+    }
+  }
+}
+
 // ============ 패킷 처리 핸들러 ============
 
 async function handlePacket(app: FastifyInstance, socket: any, packet: ProtocolPacket) {
@@ -216,7 +256,6 @@ async function handlePacket(app: FastifyInstance, socket: any, packet: ProtocolP
       break;
 
     case CMD.SET_OTA_SERVER_URL:
-    case CMD.SET_OTA_FILE_NAME:
     case CMD.SET_WS_SERVER_URL:
     case CMD.SET_REPORT_INTERVAL:
     case CMD.SET_RSSI_FILTER:
@@ -271,7 +310,6 @@ async function handleGetGwInfoResponse(app: FastifyInstance, socket: any, packet
       deviceFwVersion: info.fwVersion,
       bleFwVersion: info.hwVersion,
       otaServerUrl: info.otaServerUrl,
-      otaFileName: info.otaFileName,
       wsServerUrl: info.wsServerUrl,
       bleRssiThreshold: info.rssiFilter,
       reportInterval: info.reportInterval,
@@ -296,7 +334,6 @@ async function handleGwInfoIndication(app: FastifyInstance, socket: any, packet:
       deviceFwVersion: info.fwVersion,
       bleFwVersion: info.hwVersion,
       otaServerUrl: info.otaServerUrl,
-      otaFileName: info.otaFileName,
       wsServerUrl: info.wsServerUrl,
       bleRssiThreshold: info.rssiFilter,
       reportInterval: info.reportInterval,
@@ -391,52 +428,114 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
 
   const gwMac = socketToMac.get(socket);
 
-  const device = await prisma.device.findUnique({
-    where: { macAddress: dose.btMacAddr },
-  });
+  // device 조회 캐싱 — 등록 MAC 은 영구 캐시, 미등록 MAC 은 NEGATIVE_TTL_MS 마다 1회만 DB 조회
+  let device = deviceByMac.get(dose.btMacAddr);
+  if (!device) {
+    const expireAt = unknownMacExpiry.get(dose.btMacAddr);
+    if (expireAt !== undefined && expireAt > Date.now()) {
+      return;
+    }
+    const found = await prisma.device.findUnique({
+      where: { macAddress: dose.btMacAddr },
+      select: { id: true },
+    });
+    if (found) {
+      deviceByMac.set(dose.btMacAddr, found);
+      unknownMacExpiry.delete(dose.btMacAddr);
+      device = found;
+    } else {
+      const firstWarn = !unknownMacExpiry.has(dose.btMacAddr);
+      unknownMacExpiry.set(dose.btMacAddr, Date.now() + NEGATIVE_TTL_MS);
+      if (firstWarn) {
+        app.log.warn(`미등록 태그 첫 발견: MAC=${dose.btMacAddr} — devices 테이블에 등록되어야 dose data 가 저장됩니다`);
+      }
+      return;
+    }
+  }
+  const dev = device;
 
-  if (device) {
-    // 마지막 dose 데이터로 디바이스 상태 업데이트
+  {
+    // 마지막 dose 데이터로 디바이스 상태 업데이트 — 5 packet 마다만 (메타 정보 갱신용, 데이터 저장은 createMany 가 담당)
     const lastDose = dose.doseData[dose.doseData.length - 1];
     const voltage = lastDose ? lastDose.doseSensingVal : undefined;
     const advertisingCount = lastDose ? lastDose.advCount : undefined;
 
-    await prisma.device.update({
-      where: { id: device.id },
-      data: {
-        status: "online",
-        voltage,
-        rssi: dose.rssi,
-        battery: dose.battery,
-        temperature: Math.round(dose.temperature * 100),
-        advertisingCount,
-        uptime: new Date(),
-      },
-    });
-
-    // 각 dose 데이터를 SensorData로 저장
-    // 한 패킷 내 entry별로 1ms씩 차이를 둬서 timestamp 중복 방지
-    const nowMs = Date.now();
-    for (let i = 0; i < dose.doseData.length; i++) {
-      const entry = dose.doseData[i];
-      const sensorData = await prisma.sensorData.create({
+    const updateCnt = (updateCounterByDeviceId.get(dev.id) ?? 0) + 1;
+    updateCounterByDeviceId.set(dev.id, updateCnt);
+    if (updateCnt % 5 === 1) {
+      await prisma.device.update({
+        where: { id: dev.id },
         data: {
-          deviceId: device.id,
-          timestamp: new Date(nowMs + i),
-          voltage: entry.doseSensingVal,
+          status: "online",
+          voltage,
           rssi: dose.rssi,
           battery: dose.battery,
           temperature: Math.round(dose.temperature * 100),
-          advertisingCount: entry.advCount,
-          gatewayMac: gwMac,
+          advertisingCount,
+          uptime: new Date(),
         },
       });
+    }
 
-      // 프론트엔드 WebSocket 클라이언트에 실시간 전파
-      const clients = wsClients.get(device.id);
-      if (clients) {
+    // 각 dose 데이터를 SensorData로 저장.
+    // timestamp 는 advCount 기반 anchor 에서 파생: ts = anchorTime + (adv - firstAdv) * 25ms.
+    // 이렇게 해야 패킷 도착 시각 지터에 영향 받지 않고, 같은 advCount 는 같은 timestamp 로 매핑되어
+    // 시간축 정렬 시 advCount 가 거꾸로 가거나 인접 패킷 간 timestamp 겹침이 발생하지 않는다.
+    const nowMs = Date.now();
+    const count = dose.doseData.length;
+    const firstEntryAdv = dose.doseData[0].advCount;
+    const lastEntryAdv = dose.doseData[count - 1].advCount;
+
+    const existing = advAnchors.get(dev.id);
+    // 새 anchor 가 필요한 경우: (1) 처음, (2) 새 세션(advCount 가 이전보다 작아짐), (3) 큰 점프(60초 이상 손실)
+    const isReset = !!existing && (firstEntryAdv < existing.lastAdv || firstEntryAdv - existing.lastAdv > 60 * 40);
+    const needNewAnchor = !existing || isReset;
+    let anchor: { firstAdv: number; anchorTime: number; lastAdv: number };
+    if (needNewAnchor) {
+      // 첫 0x0B 도착 시 globalAnchorTime 을 한 번만 잡는다 — 마지막 entry 시각 = 패킷 도착 nowMs 기준 역산.
+      // 이후 모든 디바이스의 정상 신규 anchor 가 이 값을 anchorTime 으로 공유 → 5개 라인이 시간축에서 정렬됨.
+      // reset/대규모 끊김 (isReset) 케이스는 그 디바이스만 nowMs 기준으로 새 anchor 를 잡는다 — 그래야
+      // advCount 가 0 부터 다시 시작해도 timestamp 가 옛날 시각이 아닌 현재로 들어가 LIVE_WINDOW 에 보인다.
+      if (globalAnchorTime === null) {
+        globalAnchorTime = nowMs - (lastEntryAdv - firstEntryAdv) * SAMPLE_INTERVAL_MS;
+      }
+      const anchorTime = isReset
+        ? nowMs - (lastEntryAdv - firstEntryAdv) * SAMPLE_INTERVAL_MS
+        : globalAnchorTime;
+      anchor = {
+        firstAdv: firstEntryAdv,
+        anchorTime,
+        lastAdv: lastEntryAdv,
+      };
+      advAnchors.set(dev.id, anchor);
+    } else {
+      existing.lastAdv = Math.max(existing.lastAdv, lastEntryAdv);
+      anchor = existing;
+    }
+    // 한 번에 createMany 로 묶어서 connection pool 고갈 방지 (이전엔 40개 entry 마다 connection 점유)
+    const tempCent = Math.round(dose.temperature * 100);
+    const rows = dose.doseData.map((entry) => ({
+      deviceId: dev.id,
+      timestamp: new Date(anchor.anchorTime + (entry.advCount - anchor.firstAdv) * SAMPLE_INTERVAL_MS),
+      voltage: entry.doseSensingVal,
+      rssi: dose.rssi,
+      battery: dose.battery,
+      temperature: tempCent,
+      advertisingCount: entry.advCount,
+      gatewayMac: gwMac,
+    }));
+    const t0 = Date.now();
+    const result = await prisma.sensorData.createMany({ data: rows });
+    const elapsed = Date.now() - t0;
+    app.log.info(`SAVE: device=${dose.btMacAddr} adv=[${rows[0].advertisingCount}..${rows[rows.length-1].advertisingCount}] expected=${rows.length} inserted=${result.count} ${elapsed}ms`);
+
+    // 프론트엔드 WebSocket 클라이언트에 실시간 전파
+    const clients = wsClients.get(dev.id);
+    if (clients) {
+      for (let i = 0; i < count; i++) {
+        const entry = dose.doseData[i];
         const msg = JSON.stringify({
-          deviceId: device.id,
+          deviceId: dev.id,
           voltage: entry.doseSensingVal,
           rssi: dose.rssi,
           battery: dose.battery,
@@ -444,15 +543,13 @@ async function handleDoseDataIndication(app: FastifyInstance, socket: any, packe
           advertisingCount: entry.advCount,
           doseSensingVal: entry.doseSensingVal,
           gatewayMac: gwMac,
-          timestamp: sensorData.timestamp,
+          timestamp: rows[i].timestamp,
         });
         for (const client of clients) {
           try { client.send(msg); } catch { clients.delete(client); }
         }
       }
     }
-  } else {
-    app.log.warn(`미등록 태그 디바이스: ${dose.btMacAddr}`);
   }
   // 0x0B는 Gateway에 Ack 응답을 보내지 않음
 }

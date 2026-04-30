@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Tabs, Table, Button, Tag, Modal, Descriptions, message, Popconfirm,
-  Form, Input, Select, Switch, InputNumber, Upload, Divider,
+  Form, Input, Select, Switch, InputNumber, Upload, Divider, Space,
 } from "antd";
 import { PlusOutlined, ReloadOutlined, UploadOutlined, EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -34,31 +34,34 @@ export default function DevicePage() {
   const [editingName, setEditingName] = useState<"device" | "gateway" | null>(null);
   const [draftName, setDraftName] = useState("");
 
+  // Auto Reload (초). 0 또는 음수면 비활성
+  const [autoReload, setAutoReload] = useState<number>(5);
+
   const [deviceForm] = Form.useForm();
   const [gatewayForm] = Form.useForm();
   const [settingForm] = Form.useForm();
 
-  const fetchDosimeters = async () => {
-    setLoading(true);
+  const fetchDosimeters = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const { data } = await api.get("/devices");
       setDosimeters(data.data);
     } catch {
-      message.error(t("common.error"));
+      if (!silent) message.error(t("common.error"));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
-  const fetchGateways = async () => {
-    setGwLoading(true);
+  const fetchGateways = async (silent = false) => {
+    if (!silent) setGwLoading(true);
     try {
       const { data } = await api.get("/gateways");
       setGateways(data.data);
     } catch {
-      message.error(t("common.error"));
+      if (!silent) message.error(t("common.error"));
     } finally {
-      setGwLoading(false);
+      if (!silent) setGwLoading(false);
     }
   };
 
@@ -66,6 +69,16 @@ export default function DevicePage() {
     fetchDosimeters();
     fetchGateways();
   }, []);
+
+  // Auto Reload — 주기적으로 디바이스/게이트웨이 재조회 (silent: 로딩 스피너 깜빡임 없이 백그라운드 갱신)
+  useEffect(() => {
+    if (!autoReload || autoReload < 1) return;
+    const timer = setInterval(() => {
+      fetchDosimeters(true);
+      fetchGateways(true);
+    }, autoReload * 1000);
+    return () => clearInterval(timer);
+  }, [autoReload]);
 
   // When gateway is selected, populate setting form
   useEffect(() => {
@@ -242,7 +255,12 @@ export default function DevicePage() {
     { title: "MAC Address", dataIndex: "macAddress" },
     { title: "Battery", dataIndex: "battery", render: (v: number) => v != null ? `${v}%` : "-" },
     { title: "RSSI", dataIndex: "rssi", render: (v: number) => v != null ? `${v}dBm` : "-" },
-    { title: "Voltage", dataIndex: "voltage", render: (v: string) => v || "-" },
+    { title: "Voltage", dataIndex: "voltage", render: (v: number | string | null) => {
+      const n = Number(v);
+      if (v == null || !isFinite(n)) return "-";
+      // raw ADC (20-bit, Vref=1.21V) → mV
+      return `${((n * 1.21 / 0xFFFFF) * 1000).toFixed(2)} mV`;
+    } },
     { title: "Uptime", dataIndex: "uptime", render: (v: string) => v ? dayjs(v).format("YYYY-MM-DD HH:mm:ss") : "-" },
   ];
 
@@ -259,6 +277,20 @@ export default function DevicePage() {
     <>
       <Tabs
         defaultActiveKey="dosimeter"
+        tabBarExtraContent={
+          <Space size={6}>
+            <span style={{ fontWeight: 600, color: "#666" }}>Auto Reload</span>
+            <InputNumber
+              min={0}
+              max={3600}
+              value={autoReload}
+              onChange={(v) => v != null && setAutoReload(v)}
+              addonAfter="s"
+              style={{ width: 110 }}
+              size="small"
+            />
+          </Space>
+        }
         items={[
           {
             key: "dosimeter",
@@ -268,7 +300,7 @@ export default function DevicePage() {
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
                   <span style={{ color: "#888" }}>{dosimeters.length}건</span>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <Button icon={<ReloadOutlined />} onClick={fetchDosimeters} />
+                    <Button icon={<ReloadOutlined />} onClick={() => fetchDosimeters()} />
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddDeviceOpen(true)}>{t("device.add_device")}</Button>
                   </div>
                 </div>
@@ -291,7 +323,7 @@ export default function DevicePage() {
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
                   <span style={{ color: "#888" }}>{gateways.length}건</span>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <Button icon={<ReloadOutlined />} onClick={fetchGateways} />
+                    <Button icon={<ReloadOutlined />} onClick={() => fetchGateways()} />
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddGatewayOpen(true)}>{t("device.add_gateway")}</Button>
                   </div>
                 </div>
@@ -332,7 +364,11 @@ export default function DevicePage() {
             <Descriptions.Item label="Status"><Tag color={selectedDevice.status === "online" ? "green" : "default"}>{selectedDevice.status}</Tag></Descriptions.Item>
             <Descriptions.Item label="Battery">{selectedDevice.battery != null ? `${selectedDevice.battery}%` : "-"}</Descriptions.Item>
             <Descriptions.Item label="RSSI">{selectedDevice.rssi != null ? `${selectedDevice.rssi}dBm` : "-"}</Descriptions.Item>
-            <Descriptions.Item label="Voltage">{selectedDevice.voltage || "-"}</Descriptions.Item>
+            <Descriptions.Item label="Voltage">{(() => {
+              const n = Number(selectedDevice.voltage);
+              if (selectedDevice.voltage == null || !isFinite(n)) return "-";
+              return `${((n * 1.21 / 0xFFFFF) * 1000).toFixed(2)} mV`;
+            })()}</Descriptions.Item>
             <Descriptions.Item label="Uptime">{selectedDevice.uptime ? dayjs(selectedDevice.uptime).format("YYYY-MM-DD HH:mm:ss") : "-"}</Descriptions.Item>
           </Descriptions>
         )}

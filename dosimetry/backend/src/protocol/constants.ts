@@ -7,7 +7,6 @@
 export const CMD = {
   GET_GW_INFO:           0x01,
   SET_OTA_SERVER_URL:    0x02,
-  SET_OTA_FILE_NAME:     0x03,
   SET_WS_SERVER_URL:     0x04,
   SET_REPORT_INTERVAL:   0x05,
   SET_RSSI_FILTER:       0x06,
@@ -64,15 +63,15 @@ export const HEADER_SIZE = 4;
 export const MIN_PACKET_SIZE = 2;
 
 // 유효한 CMD 값 집합 (resync에 사용)
-export const VALID_CMDS = new Set([
-  CMD.GET_GW_INFO, CMD.SET_OTA_SERVER_URL, CMD.SET_OTA_FILE_NAME,
+export const VALID_CMDS: Set<number> = new Set([
+  CMD.GET_GW_INFO, CMD.SET_OTA_SERVER_URL,
   CMD.SET_WS_SERVER_URL, CMD.SET_REPORT_INTERVAL, CMD.SET_RSSI_FILTER,
   CMD.CMD_OTA_START, CMD.GW_INFO_INDICATION, CMD.GW_FACTORY_RESET,
   CMD.TAG_DATA_INDICATION, CMD.DOSE_DATA_INDICATION,
 ]);
 
 // 유효한 Direction 값 집합
-export const VALID_DIRS = new Set([DIR.REQUEST, DIR.RESPONSE, DIR.INDICATION]);
+export const VALID_DIRS: Set<number> = new Set([DIR.REQUEST, DIR.RESPONSE, DIR.INDICATION]);
 
 // Length 상한 (이 이상이면 파싱 오류로 판단)
 export const MAX_PACKET_LENGTH = 4096;
